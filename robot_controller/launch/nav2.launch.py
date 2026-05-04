@@ -79,17 +79,19 @@ def generate_launch_description():
         output='screen',
     )
 
-    # TF2: base_link → lidar_link
-    #   - z=0.1m: LiDAR 높이
-    #   - yaw=180° (π): LiDAR 물리적 방향 반전 보정
+    # TF2: base_link → lidar_link (실측 기반)
+    #   x = +0.155m : LiDAR가 로봇 중심에서 15.5cm 전방
+    #   y = 0.000m  : 좌우 중심 (오프셋 없음)
+    #   z = +0.655m : LiDAR 광학 중심이 지면에서 65.5cm
+    #   yaw=180° (π): LiDAR 물리적 방향 반전 보정
     #     quaternion(yaw=π): qx=0, qy=0, qz=sin(π/2)=1, qw=cos(π/2)=0
     tf_base_to_lidar = Node(
         package='tf2_ros',
         executable='static_transform_publisher',
         name='base_to_lidar_tf',
         arguments=[
-            '0', '0', '0.1',   # x y z (LiDAR 높이 10cm)
-            '0', '0', '1', '0',  # qx qy qz qw (yaw=180°)
+            '0.155', '0', '0.655',  # x y z (전방 15.5cm, 높이 65.5cm)
+            '0', '0', '1', '0',      # qx qy qz qw (yaw=180°)
             'base_link',
             'lidar_link',
         ],
