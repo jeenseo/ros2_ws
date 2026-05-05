@@ -1,37 +1,41 @@
 """
 nav2.launch.py
 ==============
-ROS 2 Nav2 통합 런치 파일
+ROS 2 Nav2 통합 런치 파일 — Primary Entry Point
 
-수정 사항:
-  - TF 트리 완성: base_footprint → base_link → lidar_link
-    - base_link  → lidar_link: z=0.1m, yaw=180° (LiDAR 방향 반전 보정)
-  - map_server + amcl + lifecycle_manager_localization 추가
-  - rf2o base_frame_id: base_footprint
-  - collision_monitor 제거
+주요 수정:
+  - sllidar_ros2 (src 기반) 드라이버 통합
+  - ROS_DISCOVERY_SERVER / ROS_DOMAIN_ID 환경변수 설정
+  - 55cm footprint 기반 Nav2 파라미터 연동
+  - 모터 Buzzing 방지: inflation_radius > avoidance_node 임계값
 
 시작 노드:
-  1. lidar_node          — RPLIDAR A1 (/scan)
-  2. motor_node          — /cmd_vel → CAN TX
-  3. keyboard_node       — MANUAL 제어 + /mode 토글
-  4. nav2_goal_publisher — AUTO 모드 전방 목표 게시
-  5. rf2o_laser_odometry — LiDAR 스캔 매칭 오도메트리 (/odom)
-  6. static_tf (×2)     — base_footprint→base_link, base_link→lidar_link
-  7. map_server          — 사전 빌드된 맵 로딩
-  8. amcl                — 맵 기반 위치 추정
+  1. sllidar_ros2_node  — src/sllidar_ros2 기반 LIDAR 드라이버 (/scan)
+  2. motor_node         — /cmd_vel → CAN TX (E-Stop 내장)
+  3. keyboard_node      — MANUAL 제어 + /mode 토글
+  4. nav2_goal_publisher— AUTO 모드 전방 목표 게시
+  5. rf2o_laser_odometry— LiDAR 스캔 매칭 오도메트리 (/odom)
+  6. static_tf (×2)    — base_footprint→base_link, base_link→lidar_link
+  7. map_server         — 사전 빌드된 맵 로딩
+  8. amcl               — 맵 기반 위치 추정
   9. lifecycle_manager_localization
-  10. Nav2 navigation stack (navigation_launch.py)
+  10. Nav2 navigation stack
 
 전제 조건:
+  source ~/ros2_ws/install/setup.bash
   sudo ip link set can0 up type can bitrate 500000
-  sudo apt install ros-jazzy-nav2-bringup ros-jazzy-rf2o-laser-odometry
+  (또는 setup_env.sh 실행)
 """
 
 import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.actions import (
+    DeclareLaunchArgument,
+    IncludeLaunchDescription,
+    SetEnvironmentVariable,
+)
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
@@ -43,6 +47,19 @@ def generate_launch_description():
 
     pkg_dir = get_package_share_directory('robot_controller')
 
+    # ── 환경변수 설정 (SSH 세션 안정성) ──────────────────────────
+    # ROS_DOMAIN_ID: 동일 도메인 내 로봇끼리만 통신
+    set_domain_id = SetEnvironmentVariable(
+        name='ROS_DOMAIN_ID',
+        value='30',
+    )
+    # ROS_DISCOVERY_SERVER: Fast-RTPS 디스커버리 서버 주소
+    # Raspberry Pi 고정 IP에 맞게 수정하세요.
+    set_discovery_server = SetEnvironmentVariable(
+        name='ROS_DISCOVERY_SERVER',
+        value='192.168.1.100:11811',   # ← Pi의 실제 IP로 변경
+    )
+
     # ── Launch 인수 ───────────────────────────────────────────────
     goal_dist_arg = DeclareLaunchArgument(
         'goal_distance_m', default_value='3.0',
@@ -51,10 +68,6 @@ def generate_launch_description():
     use_nav2_arg = DeclareLaunchArgument(
         'use_nav2', default_value='true',
         description='Nav2 스택 활성화 여부'
-    )
-    fov_arg = DeclareLaunchArgument(
-        'fov_degrees', default_value='360.0',
-        description='LiDAR 전방위 스캔 각도 (Nav2 기본: 360°)'
     )
 
     # 파일 경로
@@ -65,58 +78,53 @@ def generate_launch_description():
     # ── TF 트리 ──────────────────────────────────────────────────
     # ─────────────────────────────────────────────────────────────
 
-    # TF1: base_footprint → base_link (항등 변환, 지면 기준점)
+    # TF1: base_footprint → base_link (지면 기준점, 항등 변환)
     tf_footprint_to_base = Node(
         package='tf2_ros',
         executable='static_transform_publisher',
         name='footprint_to_base_tf',
-        arguments=[
-            '0', '0', '0',    # x y z
-            '0', '0', '0', '1',  # qx qy qz qw (회전 없음)
-            'base_footprint',
-            'base_link',
-        ],
+        arguments=['0', '0', '0', '0', '0', '0', '1',
+                   'base_footprint', 'base_link'],
         output='screen',
     )
 
     # TF2: base_link → lidar_link (실측 기반)
-    #   x = +0.155m : LiDAR가 로봇 중심에서 15.5cm 전방
-    #   y = 0.000m  : 좌우 중심 (오프셋 없음)
-    #   z = +0.655m : LiDAR 광학 중심이 지면에서 65.5cm
-    #   yaw=180° (π): LiDAR 물리적 방향 반전 보정
-    #     quaternion(yaw=π): qx=0, qy=0, qz=sin(π/2)=1, qw=cos(π/2)=0
+    #   x=+0.155m: LiDAR가 로봇 중심에서 15.5cm 전방
+    #   z=+0.655m: LiDAR 광학 중심이 지면에서 65.5cm
+    #   yaw=180° (qz=1, qw=0): LiDAR 물리적 방향 반전 보정
     tf_base_to_lidar = Node(
         package='tf2_ros',
         executable='static_transform_publisher',
         name='base_to_lidar_tf',
-        arguments=[
-            '0.155', '0', '0.655',  # x y z (전방 15.5cm, 높이 65.5cm)
-            '0', '0', '1', '0',      # qx qy qz qw (yaw=180°)
-            'base_link',
-            'lidar_link',
-        ],
+        arguments=['0.155', '0', '0.655', '0', '0', '1', '0',
+                   'base_link', 'lidar_link'],
         output='screen',
+    )
+
+    # ─────────────────────────────────────────────────────────────
+    # ── LIDAR: sllidar_ros2 (src 기반 드라이버) ───────────────────
+    # ─────────────────────────────────────────────────────────────
+    # 기존 rplidar_ros / 커스텀 lidar_node 대신 src/sllidar_ros2 사용
+    lidar_node = Node(
+        package='sllidar_ros2',
+        executable='sllidar_ros2_node',
+        name='sllidar_ros2_node',
+        output='screen',
+        parameters=[{
+            'serial_port':      '/dev/rplidar',  # udev 심볼릭 링크 권장
+            'serial_baudrate':  115200,
+            'frame_id':         'lidar_link',    # TF 트리와 일치
+            'inverted':         False,
+            'angle_compensate': True,
+            'scan_mode':        'Express',       # RPLiDAR A1M8 최적 모드
+        }],
     )
 
     # ─────────────────────────────────────────────────────────────
     # ── 하드웨어 노드 ─────────────────────────────────────────────
     # ─────────────────────────────────────────────────────────────
 
-    # 1. LiDAR 노드
-    lidar_node = Node(
-        package='robot_controller',
-        executable='lidar_node',
-        name='lidar_node',
-        output='screen',
-        parameters=[{
-            'port':         '/dev/ttyUSB0',
-            'baud':         115200,
-            'fov_degrees':  LaunchConfiguration('fov_degrees'),
-            'lidar_offset': 0.0,   # 180° 보정은 TF에서 처리
-        }],
-    )
-
-    # 2. 모터 노드
+    # 모터 노드 (E-Stop 내장 → Buzzing 방지)
     motor_node = Node(
         package='robot_controller',
         executable='motor_node',
@@ -129,7 +137,7 @@ def generate_launch_description():
         }],
     )
 
-    # 3. 키보드 노드 (별도 터미널)
+    # 키보드 노드 (별도 터미널 — SSH headless 환경 주의)
     keyboard_node = Node(
         package='robot_controller',
         executable='keyboard_node',
@@ -142,7 +150,7 @@ def generate_launch_description():
         }],
     )
 
-    # 4. Nav2 목표 게시 노드
+    # Nav2 목표 게시 노드
     nav2_goal_publisher = Node(
         package='robot_controller',
         executable='nav2_goal_publisher',
@@ -166,18 +174,16 @@ def generate_launch_description():
             'laser_scan_topic':     '/scan',
             'odom_topic':           '/odom',
             'publish_tf':           True,
-            'base_frame_id':        'base_footprint',   # ← 수정
+            'base_frame_id':        'base_footprint',
             'odom_frame_id':        'odom',
             'init_pose_from_topic': '',
-            'freq':                 15.0,               # 약간 빠르게
+            'freq':                 15.0,
         }],
     )
 
     # ─────────────────────────────────────────────────────────────
-    # ── 맵 서버 + AMCL + 수명 주기 관리자 (위치 추정) ─────────────
+    # ── 맵 + AMCL + 수명주기 관리자 (위치 추정) ─────────────────
     # ─────────────────────────────────────────────────────────────
-
-    # map_server: 사전 빌드된 맵 로드
     map_server_node = Node(
         package='nav2_map_server',
         executable='map_server',
@@ -189,7 +195,6 @@ def generate_launch_description():
         }],
     )
 
-    # amcl: 맵 기반 Monte Carlo 위치 추정
     amcl_node = Node(
         package='nav2_amcl',
         executable='amcl',
@@ -198,7 +203,6 @@ def generate_launch_description():
         parameters=[nav2_params_file],
     )
 
-    # lifecycle_manager: map_server + amcl 수명 주기 관리
     lifecycle_manager_localization = Node(
         package='nav2_lifecycle_manager',
         executable='lifecycle_manager',
@@ -212,7 +216,7 @@ def generate_launch_description():
     )
 
     # ─────────────────────────────────────────────────────────────
-    # ── Nav2 네비게이션 스택 ───────────────────────────────────────
+    # ── Nav2 네비게이션 스택 (55cm footprint 파라미터 연동) ────────
     # ─────────────────────────────────────────────────────────────
     nav2_bringup_dir = FindPackageShare('nav2_bringup')
 
@@ -222,7 +226,7 @@ def generate_launch_description():
         ),
         launch_arguments={
             'use_sim_time': 'false',
-            'params_file':  nav2_params_file,
+            'params_file':  nav2_params_file,  # 55cm footprint 적용된 파라미터
             'autostart':    'true',
         }.items(),
         condition=IfCondition(LaunchConfiguration('use_nav2')),
@@ -230,10 +234,13 @@ def generate_launch_description():
 
     # ─────────────────────────────────────────────────────────────
     return LaunchDescription([
+        # 환경변수 (가장 먼저)
+        set_domain_id,
+        set_discovery_server,
+
         # Launch 인수
         goal_dist_arg,
         use_nav2_arg,
-        fov_arg,
 
         # TF 트리
         tf_footprint_to_base,
@@ -248,11 +255,11 @@ def generate_launch_description():
         # 오도메트리
         rf2o_node,
 
-        # 위치 추정 (맵 + AMCL)
+        # 위치 추정
         map_server_node,
         amcl_node,
         lifecycle_manager_localization,
 
-        # Nav2 네비게이션
+        # Nav2 (55cm footprint params 연동)
         nav2_launch,
     ])
