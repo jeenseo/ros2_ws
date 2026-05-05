@@ -21,7 +21,7 @@ export ROS_DOMAIN_ID=30
 
 # ── Fast-RTPS 디스커버리 서버 (SSH 세션 안정성) ──────────────────
 # Raspberry Pi의 고정 IP 주소로 변경하세요
-export ROS_DISCOVERY_SERVER="192.168.1.100:11811"
+export ROS_DISCOVERY_SERVER="10.201.216.95:11811"
 
 # Fast-RTPS 프로파일 (슈퍼클라이언트 모드)
 export FASTRTPS_DEFAULT_PROFILES_FILE=~/ros2_ws/fastdds_super_client.xml

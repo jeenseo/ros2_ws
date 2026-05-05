@@ -57,7 +57,7 @@ def generate_launch_description():
     # Raspberry Pi 고정 IP에 맞게 수정하세요.
     set_discovery_server = SetEnvironmentVariable(
         name='ROS_DISCOVERY_SERVER',
-        value='192.168.1.100:11811',   # ← Pi의 실제 IP로 변경
+        value='10.201.216.95:11811',   # ← Pi의 실제 IP로 변경
     )
 
     # ── Launch 인수 ───────────────────────────────────────────────
@@ -107,7 +107,7 @@ def generate_launch_description():
     # 기존 rplidar_ros / 커스텀 lidar_node 대신 src/sllidar_ros2 사용
     lidar_node = Node(
         package='sllidar_ros2',
-        executable='sllidar_ros2_node',
+        executable='sllidar_node',
         name='sllidar_ros2_node',
         output='screen',
         parameters=[{
