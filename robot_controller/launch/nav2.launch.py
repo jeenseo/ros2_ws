@@ -1,30 +1,14 @@
 """
 nav2.launch.py
 ==============
-ROS 2 Nav2 통합 런치 파일 — Primary Entry Point
+ROS 2 Nav2 통합 런치 파일 — Primary Entry Point (노트북 지휘소 전용)
 
 주요 수정:
   - sllidar_ros2 (src 기반) 드라이버 통합
   - ROS_DISCOVERY_SERVER / ROS_DOMAIN_ID 환경변수 설정
   - 55cm footprint 기반 Nav2 파라미터 연동
   - 모터 Buzzing 방지: inflation_radius > avoidance_node 임계값
-
-시작 노드:
-  1. sllidar_ros2_node  — src/sllidar_ros2 기반 LIDAR 드라이버 (/scan)
-  2. motor_node         — /cmd_vel → CAN TX (E-Stop 내장)
-  3. keyboard_node      — MANUAL 제어 + /mode 토글
-  4. nav2_goal_publisher— AUTO 모드 전방 목표 게시
-  5. rf2o_laser_odometry— LiDAR 스캔 매칭 오도메트리 (/odom)
-  6. static_tf (×2)    — base_footprint→base_link, base_link→lidar_link
-  7. map_server         — 사전 빌드된 맵 로딩
-  8. amcl               — 맵 기반 위치 추정
-  9. lifecycle_manager_localization
-  10. Nav2 navigation stack
-
-전제 조건:
-  source ~/ros2_ws/install/setup.bash
-  sudo ip link set can0 up type can bitrate 500000
-  (또는 setup_env.sh 실행)
+  - [수정] 노트북(WSL) 실행을 위해 하드웨어(라이다, 모터) 및 GUI(키보드) 노드 주석 처리
 """
 
 import os
@@ -104,51 +88,52 @@ def generate_launch_description():
     # ─────────────────────────────────────────────────────────────
     # ── LIDAR: sllidar_ros2 (src 기반 드라이버) ───────────────────
     # ─────────────────────────────────────────────────────────────
-    # 기존 rplidar_ros / 커스텀 lidar_node 대신 src/sllidar_ros2 사용
-    lidar_node = Node(
-        package='sllidar_ros2',
-        executable='sllidar_node',
-        name='sllidar_ros2_node',
-        output='screen',
-        parameters=[{
-            'serial_port':      '/dev/rplidar',  # udev 심볼릭 링크 권장
-            'serial_baudrate':  115200,
-            'frame_id':         'lidar_link',    # TF 트리와 일치
-            'inverted':         False,
-            'angle_compensate': True,
-            'scan_mode':        'Express',       # RPLiDAR A1M8 최적 모드
-        }],
-    )
+    # [봉인됨] 라즈베리 파이에서 개별 실행하므로 노트북에서는 켜지 않습니다.
+    # lidar_node = Node(
+    #     package='sllidar_ros2',
+    #     executable='sllidar_node',
+    #     name='sllidar_ros2_node',
+    #     output='screen',
+    #     parameters=[{
+    #         'serial_port':      '/dev/rplidar',
+    #         'serial_baudrate':  115200,
+    #         'frame_id':         'lidar_link',
+    #         'inverted':         False,
+    #         'angle_compensate': True,
+    #         'scan_mode':        'Express',
+    #     }],
+    # )
 
     # ─────────────────────────────────────────────────────────────
     # ── 하드웨어 노드 ─────────────────────────────────────────────
     # ─────────────────────────────────────────────────────────────
 
-    # 모터 노드 (E-Stop 내장 → Buzzing 방지)
-    motor_node = Node(
-        package='robot_controller',
-        executable='motor_node',
-        name='motor_node',
-        output='screen',
-        parameters=[{
-            'can_channel': 'can0',
-            'can_id':      0x123,
-            'max_speed':   9999,
-        }],
-    )
+    # [봉인됨] 모터 노드 - 라즈베리 파이에서 개별 실행합니다.
+    # motor_node = Node(
+    #     package='robot_controller',
+    #     executable='motor_node',
+    #     name='motor_node',
+    #     output='screen',
+    #     parameters=[{
+    #         'can_channel': 'can0',
+    #         'can_id':      0x123,
+    #         'max_speed':   9999,
+    #     }],
+    # )
 
-    # 키보드 노드 (별도 터미널 — SSH headless 환경 주의)
-    keyboard_node = Node(
-        package='robot_controller',
-        executable='keyboard_node',
-        name='keyboard_node',
-        output='screen',
-        prefix='xterm -e',
-        parameters=[{
-            'normal_speed': 0.2002,
-            'boost_speed':  0.4001,
-        }],
-    )
+    # [봉인됨] 키보드 노드 - WSL에서 xterm 에러 방지를 위해 주석 처리합니다.
+    # (노트북 터미널에서 따로 `ros2 run robot_controller keyboard_node`로 실행하십시오.)
+    # keyboard_node = Node(
+    #     package='robot_controller',
+    #     executable='keyboard_node',
+    #     name='keyboard_node',
+    #     output='screen',
+    #     prefix='xterm -e',
+    #     parameters=[{
+    #         'normal_speed': 0.2002,
+    #         'boost_speed':  0.4001,
+    #     }],
+    # )
 
     # Nav2 목표 게시 노드
     nav2_goal_publisher = Node(
@@ -226,7 +211,7 @@ def generate_launch_description():
         ),
         launch_arguments={
             'use_sim_time': 'false',
-            'params_file':  nav2_params_file,  # 55cm footprint 적용된 파라미터
+            'params_file':  nav2_params_file,
             'autostart':    'true',
         }.items(),
         condition=IfCondition(LaunchConfiguration('use_nav2')),
@@ -246,10 +231,11 @@ def generate_launch_description():
         tf_footprint_to_base,
         tf_base_to_lidar,
 
-        # 하드웨어
-        lidar_node,
-        motor_node,
-        keyboard_node,
+        # 하드웨어 및 수동 조작 노드 (노트북에서는 제외됨)
+        # lidar_node,
+        # motor_node,
+        # keyboard_node,
+        
         nav2_goal_publisher,
 
         # 오도메트리
