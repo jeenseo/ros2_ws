@@ -1,4 +1,4 @@
-image: /home/jeen/ros2_ws/src/robot_controller/maps/map.pgm
+image: map.pgm
 resolution: 0.050000
 origin: [-48.785328, -16.65805, 0.0]
 negate: 0

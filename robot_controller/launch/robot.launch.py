@@ -10,7 +10,7 @@ def generate_launch_description():
         description='전방 감시 시야각 (도): 60, 120, 180'
     )
     lidar_offset_arg = DeclareLaunchArgument(
-        'lidar_offset', default_value='0.0',
+        'lidar_offset', default_value='180.0',
         description='LiDAR 0° 보정 오프셋 (도)'
     )
     obstacle_dist_arg = DeclareLaunchArgument(
@@ -79,6 +79,7 @@ def generate_launch_description():
             'backward_10cm_sec': LaunchConfiguration('backward_10cm_sec'),
             'forward_speed': 0.2002,
             'turn_speed': 0.2002,
+            'lidar_offset': LaunchConfiguration('lidar_offset'),
         }],
     )
 
