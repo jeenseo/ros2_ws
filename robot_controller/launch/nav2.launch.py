@@ -39,10 +39,10 @@ def generate_launch_description():
     )
     # ROS_DISCOVERY_SERVER: Fast-RTPS 디스커버리 서버 주소
     # Raspberry Pi 고정 IP에 맞게 수정하세요.
-    set_discovery_server = SetEnvironmentVariable(
-        name='ROS_DISCOVERY_SERVER',
-        value='10.201.216.95:11811',   # ← Pi의 실제 IP로 변경
-    )
+    #set_discovery_server = SetEnvironmentVariable(
+    #    name='ROS_DISCOVERY_SERVER',
+    #    value='10.201.216.95:11811',   # ← Pi의 실제 IP로 변경
+    #)
 
     # ── Launch 인수 ───────────────────────────────────────────────
     goal_dist_arg = DeclareLaunchArgument(
@@ -221,7 +221,7 @@ def generate_launch_description():
     return LaunchDescription([
         # 환경변수 (가장 먼저)
         set_domain_id,
-        set_discovery_server,
+        #set_discovery_server,
 
         # Launch 인수
         goal_dist_arg,
