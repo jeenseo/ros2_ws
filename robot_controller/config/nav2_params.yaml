@@ -283,7 +283,7 @@ global_costmap: # $전역 코스트맵: 사전 빌드된 정적 맵 사용
 map_server:
   ros__parameters:
     use_sim_time:  false
-    yaml_filename: ""   # launch 파일에서 주입
+    yaml_filename: "/mnt/c/Users/tjwld/ros2_ws/src/robot_controller/maps/map.yaml"   # launch 파일에서 주입
 
 map_saver:
   ros__parameters:
@@ -371,6 +371,23 @@ velocity_smoother:
     velocity_timeout:     1.0
 
 # ─────────────────────────────────────────────────────────────────────────
-# collision_monitor 제거됨:
-#   파라미터 미정의 시 lifecycle_manager가 Abort하므로 비활성화
+# collision_monitor (ROS 2 Jazzy Nav2에서 기본 포함)
 # ─────────────────────────────────────────────────────────────────────────
+# Jazzy의 navigation_launch.py lifecycle_nodes 목록에 collision_monitor가
+# 추가됨. 파라미터가 없으면 lifecycle_manager가 configure 단계에서 Abort.
+# → 기능을 비활성화하되 파라미터 섹션은 반드시 존재해야 함.
+collision_monitor:
+  ros__parameters:
+    use_sim_time:           false
+    base_frame_id:          "base_footprint"
+    odom_frame_id:          "odom"
+    cmd_vel_in_topic:       "cmd_vel_smoothed"
+    cmd_vel_out_topic:      "cmd_vel"
+    state_topic:            "collision_monitor_state"
+    transform_tolerance:    0.2
+    source_timeout:         1.0
+    stop_pub_timeout:       2.0
+    enabled:                True
+    # 폴리곤 없이 비어있는 설정 → 실질적 모니터링 없음 (비활성화 효과)
+    polygons:               []
+    observation_sources:    []
