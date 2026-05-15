@@ -10,6 +10,7 @@ ROS 2 Nav2 통합 런치 파일 — Raspberry Pi 로컬 실행 전용
     → 순수 로컬 통신 (Domain ID 0 기본값 사용)
   - 55cm footprint 기반 Nav2 파라미터 연동
   - 모터 Buzzing 방지: inflation_radius > avoidance_node 임계값
+  - [추가] RViz2 수동 조작을 위해 nav2_goal_publisher 강제 주석 처리
 """
 
 import os
@@ -32,9 +33,6 @@ def generate_launch_description():
     pkg_dir = get_package_share_directory('robot_controller')
 
     # ── Launch 인수 ───────────────────────────────────────────────
-    # [수정] ROS_DOMAIN_ID / ROS_DISCOVERY_SERVER 환경변수 제거
-    # → ROS 2 Jazzy 로컬 실행: 기본 Domain ID 0 + 자동 DDS discovery 사용
-    # → 터미널에서도 동일 도메인(0)으로 ros2 topic list / ros2 node list 작동
     goal_dist_arg = DeclareLaunchArgument(
         'goal_distance_m', default_value='3.0',
         description='AUTO 모드 전방 목표 거리 (m)'
@@ -52,7 +50,6 @@ def generate_launch_description():
     # ── TF 트리 ──────────────────────────────────────────────────
     # ─────────────────────────────────────────────────────────────
 
-    # TF1: base_footprint → base_link (지면 기준점, 항등 변환)
     tf_footprint_to_base = Node(
         package='tf2_ros',
         executable='static_transform_publisher',
@@ -62,10 +59,6 @@ def generate_launch_description():
         output='screen',
     )
 
-    # TF2: base_link → lidar_link (실측 기반)
-    #   x=+0.155m: LiDAR가 로봇 중심에서 15.5cm 전방
-    #   z=+0.655m: LiDAR 광학 중심이 지면에서 65.5cm
-    #   yaw=180° (qz=1, qw=0): LiDAR 물리적 방향 반전 보정
     tf_base_to_lidar = Node(
         package='tf2_ros',
         executable='static_transform_publisher',
@@ -80,7 +73,7 @@ def generate_launch_description():
     # ─────────────────────────────────────────────────────────────
     lidar_node = Node(
         package='sllidar_ros2',
-        executable='sllidar_ros2_node',
+        executable='sllidar_node',
         name='sllidar_ros2_node',
         output='screen',
         parameters=[{
@@ -89,7 +82,7 @@ def generate_launch_description():
             'frame_id':         'lidar_link',
             'inverted':         False,
             'angle_compensate': True,
-            'scan_mode':        'Express',
+            'scan_mode':        'Standard',
         }],
     )
 
@@ -109,17 +102,17 @@ def generate_launch_description():
         }],
     )
 
-    # Nav2 목표 게시 노드
-    nav2_goal_publisher = Node(
-        package='robot_controller',
-        executable='nav2_goal_publisher',
-        name='nav2_goal_publisher',
-        output='screen',
-        parameters=[{
-            'goal_distance_m': LaunchConfiguration('goal_distance_m'),
-            'update_rate_hz':  0.5,
-        }],
-    )
+    # Nav2 목표 게시 노드 (RViz2 수동 조작 충돌 방지를 위해 주석 처리 ★)
+    # nav2_goal_publisher = Node(
+    #     package='robot_controller',
+    #     executable='nav2_goal_publisher',
+    #     name='nav2_goal_publisher',
+    #     output='screen',
+    #     parameters=[{
+    #         'goal_distance_m': LaunchConfiguration('goal_distance_m'),
+    #         'update_rate_hz':  0.5,
+    #     }],
+    # )
 
     # ─────────────────────────────────────────────────────────────
     # ── 오도메트리: rf2o (엔코더 없는 스캔 매칭) ──────────────────
@@ -204,7 +197,8 @@ def generate_launch_description():
         # 하드웨어
         lidar_node,
         motor_node,
-        nav2_goal_publisher,
+        
+        # nav2_goal_publisher,  # ← 리스트에서도 주석 처리 ★
 
         # 오도메트리
         rf2o_node,
@@ -214,6 +208,6 @@ def generate_launch_description():
         amcl_node,
         lifecycle_manager_localization,
 
-        # Nav2 (55cm footprint params 연동)
+        # Nav2
         nav2_launch,
     ])
