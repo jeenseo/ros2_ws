@@ -1,16 +1,15 @@
 """
 nav2.launch.py
 ==============
-ROS 2 Nav2 통합 런치 파일 — Raspberry Pi 로컬 실행 전용
+ROS 2 Nav2 통합 런치 파일 — Raspberry Pi 로컬 실행 전용 (Foxglove Studio)
 
 주요 수정:
   - sllidar_ros2 (src 기반) 드라이버 통합
-  - [수정] ROS_DOMAIN_ID / ROS_DISCOVERY_SERVER 환경변수 완전 제거
-    → 이전 멀티머신 설정이 로컬 DDS를 격리시키는 원인이었음
-    → 순수 로컬 통신 (Domain ID 0 기본값 사용)
+  - ROS_DOMAIN_ID / ROS_DISCOVERY_SERVER 환경변수 완전 제거 (순수 로컬 통신)
   - 55cm footprint 기반 Nav2 파라미터 연동
-  - 모터 Buzzing 방지: inflation_radius > avoidance_node 임계값
-  - [추가] RViz2 수동 조작을 위해 nav2_goal_publisher 강제 주석 처리
+  - [수정] nav2_goal_publisher 완전 제거 → Foxglove에서 직접 NavigateToPose Goal 설정
+  - [수정] motor_node remapping: /cmd_vel_nav2 ← /cmd_vel (Nav2 출력)
+    → motor_node 내부 mode-aware mux에서 AUTO 모드에서만 CAN 전송
 """
 
 import os
@@ -33,10 +32,6 @@ def generate_launch_description():
     pkg_dir = get_package_share_directory('robot_controller')
 
     # ── Launch 인수 ───────────────────────────────────────────────
-    goal_dist_arg = DeclareLaunchArgument(
-        'goal_distance_m', default_value='3.0',
-        description='AUTO 모드 전방 목표 거리 (m)'
-    )
     use_nav2_arg = DeclareLaunchArgument(
         'use_nav2', default_value='true',
         description='Nav2 스택 활성화 여부'
@@ -50,6 +45,7 @@ def generate_launch_description():
     # ── TF 트리 ──────────────────────────────────────────────────
     # ─────────────────────────────────────────────────────────────
 
+    # TF1: base_footprint → base_link (지면 기준점, 항등 변환)
     tf_footprint_to_base = Node(
         package='tf2_ros',
         executable='static_transform_publisher',
@@ -59,6 +55,10 @@ def generate_launch_description():
         output='screen',
     )
 
+    # TF2: base_link → lidar_link (실측 기반)
+    #   x=+0.155m: LiDAR가 로봇 중심에서 15.5cm 전방
+    #   z=+0.655m: LiDAR 광학 중심이 지면에서 65.5cm
+    #   yaw=180° (qz=1, qw=0): LiDAR 물리적 방향 반전 보정
     tf_base_to_lidar = Node(
         package='tf2_ros',
         executable='static_transform_publisher',
@@ -69,7 +69,7 @@ def generate_launch_description():
     )
 
     # ─────────────────────────────────────────────────────────────
-    # ── LIDAR: sllidar_ros2 (src 기반 드라이버) ───────────────────
+    # ── LIDAR: sllidar_ros2 ───────────────────────────────────────
     # ─────────────────────────────────────────────────────────────
     lidar_node = Node(
         package='sllidar_ros2',
@@ -100,19 +100,12 @@ def generate_launch_description():
             'can_id':      0x123,
             'max_speed':   9999,
         }],
+        # [핵심 remapping]
+        # motor_node 내부: /cmd_vel_nav2 구독
+        # 실제 ROS 그래프: Nav2 controller가 게시하는 /cmd_vel 수신
+        # → motor_node의 mode-aware mux가 AUTO 모드에서만 CAN 전달
+        remappings=[('/cmd_vel_nav2', '/cmd_vel')],
     )
-
-    # Nav2 목표 게시 노드 (RViz2 수동 조작 충돌 방지를 위해 주석 처리 ★)
-    # nav2_goal_publisher = Node(
-    #     package='robot_controller',
-    #     executable='nav2_goal_publisher',
-    #     name='nav2_goal_publisher',
-    #     output='screen',
-    #     parameters=[{
-    #         'goal_distance_m': LaunchConfiguration('goal_distance_m'),
-    #         'update_rate_hz':  0.5,
-    #     }],
-    # )
 
     # ─────────────────────────────────────────────────────────────
     # ── 오도메트리: rf2o (엔코더 없는 스캔 매칭) ──────────────────
@@ -187,27 +180,24 @@ def generate_launch_description():
     # ─────────────────────────────────────────────────────────────
     return LaunchDescription([
         # Launch 인수
-        goal_dist_arg,
         use_nav2_arg,
 
         # TF 트리
         tf_footprint_to_base,
         tf_base_to_lidar,
 
-        # 하드웨어
+        # 하드웨어 (lidar, motor)
         lidar_node,
         motor_node,
-        
-        # nav2_goal_publisher,  # ← 리스트에서도 주석 처리 ★
 
         # 오도메트리
         rf2o_node,
 
-        # 위치 추정
+        # 위치 추정 (map + AMCL)
         map_server_node,
         amcl_node,
         lifecycle_manager_localization,
 
-        # Nav2
+        # Nav2 플래너/컨트롤러 스택
         nav2_launch,
     ])

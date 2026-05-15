@@ -23,8 +23,8 @@ ROS 2 Node: 터미널 키보드 제어 (Wayland 호환, 비동기 멀티키 지�
   W + A   → linear=+spd, angular=+spd  (전진 + 좌회전)
 
 토픽 출력:
-  /cmd_vel  (geometry_msgs/Twist) — MANUAL 모드일 때만 게시
-  /mode     (std_msgs/String)     — "MANUAL" | "AUTO"
+  /cmd_vel_keyboard  (geometry_msgs/Twist) — MANUAL 모드일 때만 게시
+  /mode              (std_msgs/String)     — "MANUAL" | "AUTO"
 
 파라미터:
   normal_speed  float  0.2002  (= 2000/9999)
@@ -63,7 +63,9 @@ class KeyboardNode(Node):
         self._spd_boost  = self.get_parameter('boost_speed').value
 
         # ── 토픽 게시자 ───────────────────────────────────────────
-        self._cmd_pub  = self.create_publisher(Twist,  '/cmd_vel', 10)
+        # /cmd_vel_keyboard: motor_node의 MANUAL 전용 구독 토픽
+        # (Nav2의 /cmd_vel과 분리 → motor_node에서 mode-aware mux 처리)
+        self._cmd_pub  = self.create_publisher(Twist,  '/cmd_vel_keyboard', 10)
         self._mode_pub = self.create_publisher(String, '/mode',    10)
 
         # ── 공유 상태 ─────────────────────────────────────────────
