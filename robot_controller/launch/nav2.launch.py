@@ -55,15 +55,20 @@ def generate_launch_description():
         output='screen',
     )
 
-    # TF2: base_link → lidar_link (실측 기반)
-    #   x=+0.155m: LiDAR가 로봇 중심에서 15.5cm 전방
-    #   z=+0.655m: LiDAR 광학 중심이 지면에서 65.5cm
-    #   yaw=180° (qz=1, qw=0): LiDAR 물리적 방향 반전 보정
+    # TF2: base_link → lidar_link (물리 실측 기반 수정)
+    #
+    # 계산 근거:
+    #   x = +0.160m  : 로봇 중심에서 전방 16cm (실측)
+    #   y =  0.000m  : 좌우 중앙 정렬
+    #   z = +0.355m  : 로봇 3D 중심 높이(61cm/2=30.5cm) + LiDAR 오프셋(+5cm) = 35.5cm
+    #
+    # rotation (qx,qy,qz,qw) = (0,0,0,1): identity (회전 없음)
+    #   ※ LiDAR가 물리적으로 뒤집혀 마운트된 경우 qz=1, qw=0 (yaw=180°)으로 변경
     tf_base_to_lidar = Node(
         package='tf2_ros',
         executable='static_transform_publisher',
         name='base_to_lidar_tf',
-        arguments=['0.155', '0', '0.655', '0', '0', '1', '0',
+        arguments=['0.160', '0', '0.355', '0', '0', '0', '1',
                    'base_link', 'lidar_link'],
         output='screen',
     )
