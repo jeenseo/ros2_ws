@@ -32,11 +32,10 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'lidar_node          = robot_controller.lidar_node:main',
-            'motor_node          = robot_controller.motor_node:main',
-            'avoidance_node      = robot_controller.avoidance_node:main',
-            'keyboard_node       = robot_controller.keyboard_node:main',
-            'nav2_goal_publisher = robot_controller.nav2_goal_publisher:main',
+            'lidar_node     = robot_controller.lidar_node:main',
+            'motor_node     = robot_controller.motor_node:main',
+            'avoidance_node = robot_controller.avoidance_node:main',
+            'keyboard_node  = robot_controller.keyboard_node:main',
         ],
     },
 )
