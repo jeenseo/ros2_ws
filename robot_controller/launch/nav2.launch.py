@@ -77,7 +77,7 @@ def generate_launch_description():
         name='sllidar_ros2_node',
         output='screen',
         parameters=[{
-            'serial_port':      '/dev/rplidar',
+            'serial_port':      '/dev/ttyUSB0',
             'serial_baudrate':  115200,
             'frame_id':         'lidar_link',
             'inverted':         False,
