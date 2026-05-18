@@ -125,20 +125,20 @@ controller_server:
       max_vel_x:                           0.22
       max_vel_y:                           0.0
       # [수정] 0.4 → 0.8: 더 빠른 회전 허용 → 경로 추종 능력 향상
-      max_vel_theta:                       0.4
+      max_vel_theta:                       0.2
       min_speed_xy:                        0.0
       max_speed_xy:                        0.22
       min_speed_theta:                     0.0
       # [수정] 0.15 → 0.5: 너무 낮은 가속 한계가 DWB를 회전 위주로 구동시켜 진동 유발
-      acc_lim_x:                           0.3
+      acc_lim_x:                           0.2
       acc_lim_y:                           0.0
       # [수정] 0.2 → 0.8: 각가속도 한계도 증가 → DWB가 실제 물리를 정확히 시뮬레이션
-      acc_lim_theta:                       0.3
+      acc_lim_theta:                       0.2
       # [수정] -0.25 → -0.5
-      decel_lim_x:                         -0.3 # 
+      decel_lim_x:                         -0.2 # 
       decel_lim_y:                         0.0
       # [수정] -0.2 → -0.8
-      decel_lim_theta:                     -0.3
+      decel_lim_theta:                     -0.2
       vx_samples:                          20
       vy_samples:                          5
       vtheta_samples:                      20
@@ -316,9 +316,9 @@ behavior_server:
     use_sim_time:           false
     simulate_ahead_time:    2.0
     # [수정] DWB max_vel_theta(0.8), acc_lim_theta(0.8)에 맞춰 동기화
-    max_rotational_vel:     0.8
+    max_rotational_vel:     0.2
     min_rotational_vel:     0.1
-    rotational_acc_lim:     0.8
+    rotational_acc_lim:     0.2
 
 # ─────────────────────────────────────────────────────────────────────────
 waypoint_follower:
@@ -340,10 +340,10 @@ velocity_smoother:
     scale_velocities:     False
     feedback:             "OPEN_LOOP"
     # [수정] DWB 파라미터와 완전 동기화 (velocity_smoother != controller_server 시 surge 발생)
-    max_velocity:         [0.22, 0.0, 0.8]
-    min_velocity:         [-0.22, 0.0, -0.8]
-    max_accel:            [0.5, 0.0, 0.8]
-    max_decel:            [-0.5, 0.0, -0.8]
+    max_velocity:         [0.22, 0.0, 0.2]
+    min_velocity:         [-0.22, 0.0, -0.2]
+    max_accel:            [0.2, 0.0, 0.2]
+    max_decel:            [-0.2, 0.0, -0.2]
     odom_topic:           "odom"
     odom_duration:        0.1
     deadband_velocity:    [0.0, 0.0, 0.0]
