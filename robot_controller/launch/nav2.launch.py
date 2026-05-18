@@ -68,9 +68,8 @@ def generate_launch_description():
         package='tf2_ros',
         executable='static_transform_publisher',
         name='base_to_lidar_tf',
-        arguments=['0.160', '0', '0.355', '0', '0', '0', '1',
-                   'base_link', 'lidar_link'],
-        output='screen',
+        arguments=['0.160', '0.0', '0.355', '3.14159', '0.0', '0.0', 'base_link', 'lidar_link'],
+        output='screen'
     )
 
     # ─────────────────────────────────────────────────────────────
