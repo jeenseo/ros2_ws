@@ -125,20 +125,20 @@ controller_server:
       max_vel_x:                           0.22
       max_vel_y:                           0.0
       # [수정] 0.4 → 0.8: 더 빠른 회전 허용 → 경로 추종 능력 향상
-      max_vel_theta:                       0.8
+      max_vel_theta:                       0.4
       min_speed_xy:                        0.0
       max_speed_xy:                        0.22
       min_speed_theta:                     0.0
       # [수정] 0.15 → 0.5: 너무 낮은 가속 한계가 DWB를 회전 위주로 구동시켜 진동 유발
-      acc_lim_x:                           0.5
+      acc_lim_x:                           0.3
       acc_lim_y:                           0.0
       # [수정] 0.2 → 0.8: 각가속도 한계도 증가 → DWB가 실제 물리를 정확히 시뮬레이션
-      acc_lim_theta:                       0.8
+      acc_lim_theta:                       0.3
       # [수정] -0.25 → -0.5
-      decel_lim_x:                         -0.5
+      decel_lim_x:                         -0.3 # 
       decel_lim_y:                         0.0
       # [수정] -0.2 → -0.8
-      decel_lim_theta:                     -0.8
+      decel_lim_theta:                     -0.3
       vx_samples:                          20
       vy_samples:                          5
       vtheta_samples:                      20
