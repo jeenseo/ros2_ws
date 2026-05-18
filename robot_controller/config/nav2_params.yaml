@@ -96,7 +96,8 @@ bt_navigator:
 controller_server:
   ros__parameters:
     use_sim_time:                 false
-    controller_frequency:         5.0
+    # [수정] 5Hz → 10Hz: 낮은 주파수가 경로 추종 지연 및 진동의 주 원인
+    controller_frequency:         10.0
     min_x_velocity_threshold:     0.001
     min_y_velocity_threshold:     0.5
     min_theta_velocity_threshold: 0.001
@@ -108,7 +109,7 @@ controller_server:
     progress_checker:
       plugin: "nav2_controller::SimpleProgressChecker"
       required_movement_radius: 0.5
-      movement_time_allowance:  10.0
+      movement_time_allowance:  15.0
 
     general_goal_checker:
       stateful:        True
@@ -121,40 +122,51 @@ controller_server:
       debug_trajectory_details:            True
       min_vel_x:                           0.0
       min_vel_y:                           0.0
-      max_vel_x:                           0.22 # $로봇 직진 최대 속도
+      max_vel_x:                           0.22
       max_vel_y:                           0.0
-      max_vel_theta:                       0.4  # 로봇 회전 최대 회전 속도
+      # [수정] 0.4 → 0.8: 더 빠른 회전 허용 → 경로 추종 능력 향상
+      max_vel_theta:                       0.8
       min_speed_xy:                        0.0
       max_speed_xy:                        0.22
       min_speed_theta:                     0.0
-      acc_lim_x:                           0.15 # 급출발 속도
+      # [수정] 0.15 → 0.5: 너무 낮은 가속 한계가 DWB를 회전 위주로 구동시켜 진동 유발
+      acc_lim_x:                           0.5
       acc_lim_y:                           0.0
-      acc_lim_theta:                       0.2
-      decel_lim_x:                         -0.25 # 급정지 속도
+      # [수정] 0.2 → 0.8: 각가속도 한계도 증가 → DWB가 실제 물리를 정확히 시뮬레이션
+      acc_lim_theta:                       0.8
+      # [수정] -0.25 → -0.5
+      decel_lim_x:                         -0.5
       decel_lim_y:                         0.0
-      decel_lim_theta:                     -0.2
+      # [수정] -0.2 → -0.8
+      decel_lim_theta:                     -0.8
       vx_samples:                          20
       vy_samples:                          5
       vtheta_samples:                      20
-      sim_time:                            1.7
+      sim_time:                            1.5
       linear_granularity:                  0.05
       angular_granularity:                 0.025
-      transform_tolerance:                 1.0 # tf 변환 허용 오차 시간 원래 0.3
-      xy_goal_tolerance:                   0.25 # $목표 위치 허용 오차
+      transform_tolerance:                 1.0
+      xy_goal_tolerance:                   0.25
       trans_stopped_velocity:              0.25
       short_circuit_trajectory_evaluation: True
       stateful:                            True
       critics: ["RotateToGoal", "Oscillation", "BaseObstacle", "GoalAlign",
                 "PathAlign", "PathDist", "GoalDist"]
       BaseObstacle.scale:              0.02
-      PathAlign.scale:                 32.0
-      PathAlign.forward_point_distance: 0.1
-      GoalAlign.scale:                 24.0
-      GoalAlign.forward_point_distance: 0.1
+      # [수정] 32.0 → 16.0: PathAlign과 GoalAlign 경쟁 완화 → 좌우 진동 감소
+      PathAlign.scale:                 16.0
+      # [수정] 0.1 → 0.3: 당근 거리 30cm → 고주파 진동 억제
+      PathAlign.forward_point_distance: 0.3
+      # [수정] 24.0 → 16.0
+      GoalAlign.scale:                 16.0
+      # [수정] 0.1 → 0.3
+      GoalAlign.forward_point_distance: 0.3
       PathDist.scale:                  32.0
       GoalDist.scale:                  24.0
-      RotateToGoal.scale:              32.0
-      RotateToGoal.slowing_factor:     5.0
+      # [수정] 32.0 → 24.0: 목표 근처 과도한 회전 감소
+      RotateToGoal.scale:              24.0
+      # [수정] 5.0 → 3.0: 목표 접근 시 과도한 감속 완화
+      RotateToGoal.slowing_factor:     3.0
       RotateToGoal.lookahead_time:     -1.0
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -181,11 +193,10 @@ local_costmap: # $로봇 주변의 동적 장애물 감지 및 회피를 위한 
       plugins: ["obstacle_layer", "inflation_layer"]
       inflation_layer:
         plugin:              "nav2_costmap_2d::InflationLayer"
-        # inflation_radius: 0.35m = footprint 경계에서 35cm까지 비용 gradient 형성
-        #   → 실질 안전 마진 약 7cm (footprint 자체가 정확하므로 충분)
-        # cost_scaling_factor: 2.5 = 완만한 비용 감소 → 장애물 주변 경로 부드럽게 우회
+        # [수정] 0.35 → 0.30: 벽 근처에서 유효 궤적이 없어 정지하는 문제 완화
+        #   로봇 반폭(0.28m) + inflation(0.30m) = 0.58m 최소 통과 폭
         cost_scaling_factor: 2.5
-        inflation_radius:    0.35
+        inflation_radius:    0.30
       obstacle_layer: # VoxelLayer 덩어리를 삭제하고 이걸로 채워 넣습니다.
         plugin:               "nav2_costmap_2d::ObstacleLayer"
         enabled:              True
@@ -240,8 +251,9 @@ global_costmap: # $전역 코스트맵: 사전 빌드된 정적 맵 사용
           obstacle_min_range:  0.0
       inflation_layer:
         plugin:              "nav2_costmap_2d::InflationLayer"
+        # [수정] global_costmap도 동일 기준 적용 (0.35 → 0.30)
         cost_scaling_factor: 2.5
-        inflation_radius:    0.35
+        inflation_radius:    0.30
       always_send_full_costmap: False
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -300,12 +312,13 @@ behavior_server:
       plugin: "nav2_behaviors::AssistedTeleop"
     global_frame:           odom
     robot_base_frame:       base_footprint
-    transform_tolerance:    1.0 # tf 변환 허용 오차 시간 원래 0.1
+    transform_tolerance:    1.0
     use_sim_time:           false
     simulate_ahead_time:    2.0
-    max_rotational_vel:     0.4
+    # [수정] DWB max_vel_theta(0.8), acc_lim_theta(0.8)에 맞춰 동기화
+    max_rotational_vel:     0.8
     min_rotational_vel:     0.1
-    rotational_acc_lim:     0.2
+    rotational_acc_lim:     0.8
 
 # ─────────────────────────────────────────────────────────────────────────
 waypoint_follower:
@@ -326,10 +339,11 @@ velocity_smoother:
     smoothing_frequency:  20.0
     scale_velocities:     False
     feedback:             "OPEN_LOOP"
-    max_velocity:         [0.22, 0.0, 0.4]
-    min_velocity:         [-0.22, 0.0, -0.4]
-    max_accel:            [0.15, 0.0, 0.2]
-    max_decel:            [-0.25, 0.0, -0.2]
+    # [수정] DWB 파라미터와 완전 동기화 (velocity_smoother != controller_server 시 surge 발생)
+    max_velocity:         [0.22, 0.0, 0.8]
+    min_velocity:         [-0.22, 0.0, -0.8]
+    max_accel:            [0.5, 0.0, 0.8]
+    max_decel:            [-0.5, 0.0, -0.8]
     odom_topic:           "odom"
     odom_duration:        0.1
     deadband_velocity:    [0.0, 0.0, 0.0]

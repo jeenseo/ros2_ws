@@ -42,8 +42,16 @@ import tty
 
 import rclpy
 from rclpy.node import Node
+from rclpy.action import ActionClient
 from geometry_msgs.msg import Twist
 from std_msgs.msg import String
+
+# Nav2 Action — navigate_to_pose 취소용
+try:
+    from nav2_msgs.action import NavigateToPose
+    _NAV2_AVAILABLE = True
+except ImportError:
+    _NAV2_AVAILABLE = False
 
 # ── 속도 레벨 ─────────────────────────────────────────────────────
 SPEED_NORMAL = 2000 / 9999   # ≈ 0.2002
@@ -67,6 +75,15 @@ class KeyboardNode(Node):
         # (Nav2의 /cmd_vel과 분리 → motor_node에서 mode-aware mux 처리)
         self._cmd_pub  = self.create_publisher(Twist,  '/cmd_vel_keyboard', 10)
         self._mode_pub = self.create_publisher(String, '/mode',    10)
+
+        # ── Nav2 Action Client (MANUAL 전환 시 목표 취소용) ──────
+        # AUTO → MANUAL 전환 시 active goal을 취소하지 않으면
+        # Nav2가 계속 /cmd_vel을 게시하고 복구 행동을 시도함
+        if _NAV2_AVAILABLE:
+            self._nav2_client = ActionClient(self, NavigateToPose, 'navigate_to_pose')
+        else:
+            self._nav2_client = None
+            self.get_logger().warn('nav2_msgs 미설치: AUTO→MANUAL 전환 시 Nav2 취소 비활성화')
 
         # ── 공유 상태 ─────────────────────────────────────────────
         self._mode       = 'MANUAL'
@@ -165,9 +182,16 @@ class KeyboardNode(Node):
                         esc_pending = False
 
                     elif ch in ('m', 'M'):
+                        prev_mode  = self._mode
                         self._mode = 'AUTO' if self._mode == 'MANUAL' else 'MANUAL'
                         self.get_logger().info(f'[MODE] → {self._mode}')
                         self._publish_mode()
+                        # AUTO → MANUAL 전환 시 Nav2 active goal 즉시 취소
+                        # 취소 없으면: Nav2가 10~15초간 계속 /cmd_vel 게시
+                        #              → 복구 행동(spin/backup) 시도 → motor_node가 차단
+                        #              → 모터 드라이버가 0 duty PWM에서 고음 발생
+                        if prev_mode == 'AUTO' and self._mode == 'MANUAL':
+                            self._cancel_nav2_goal()
                         current_frame.clear()
 
                     elif ch in ('b', 'B'):
@@ -194,6 +218,28 @@ class KeyboardNode(Node):
             except Exception as exc:
                 self.get_logger().error(f'[KB] 오류: {exc}')
                 break
+
+    # ── Nav2 Goal 취소 헬퍼 ──────────────────────────────────────
+    def _cancel_nav2_goal(self) -> None:
+        """AUTO→MANUAL 전환 시 모든 active navigate_to_pose 목표를 취소."""
+        if self._nav2_client is None:
+            return
+        # 서버 준비 여부 확인 (0초 대기 = 논블로킹)
+        if not self._nav2_client.server_is_ready():
+            self.get_logger().debug('[NAV2] navigate_to_pose 서버 미준비, 취소 건너뜀')
+            return
+        # 비동기 취소 요청 — 결과를 기다리지 않음 (fire-and-forget)
+        cancel_future = self._nav2_client.cancel_all_goals_async()
+        cancel_future.add_done_callback(self._cancel_done_cb)
+        self.get_logger().info('[NAV2] navigate_to_pose 목표 취소 요청 전송')
+
+    def _cancel_done_cb(self, future) -> None:
+        """취소 요청 완료 콜백."""
+        try:
+            result = future.result()
+            self.get_logger().info(f'[NAV2] 목표 취소 완료 (goals_canceling={len(result.goals_canceling)})')
+        except Exception as exc:
+            self.get_logger().warn(f'[NAV2] 목표 취소 응답 오류: {exc}')
 
     # ── 20Hz 타이머: MANUAL 모드 명령 게시 ───────────────────────
     def _publish_cmd(self) -> None:
