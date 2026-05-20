@@ -86,7 +86,7 @@ def generate_launch_description():
             'frame_id':         'lidar_link',
             'inverted':         False,
             'angle_compensate': True,
-            'scan_mode':        'Standard',
+            'scan_mode':        'Standard',  # 'Standard' 또는 'Express' (모델에 따라 다름)
         }],
     )
 
@@ -110,7 +110,6 @@ def generate_launch_description():
         # → motor_node의 mode-aware mux가 AUTO 모드에서만 CAN 전달
         remappings=[('/cmd_vel_nav2', '/cmd_vel')],
     )
-
     # ─────────────────────────────────────────────────────────────
     # ── 오도메트리: rf2o (엔코더 없는 스캔 매칭) ──────────────────
     # ─────────────────────────────────────────────────────────────
