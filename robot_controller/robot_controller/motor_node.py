@@ -3,6 +3,10 @@ motor_node.py
 =============
 ROS 2 Node: cmd_vel → CAN 8-바이트 4-휠 독립 모터 명령 변환기
 
+[수정] 스키드-스티어(Skid-Steer) 구동 방식 완벽 적용
+  - 좌측 바퀴(FL, RL)와 우측 바퀴(FR, RR)의 속도를 각각 완벽히 동기화하여
+    내부 마찰 및 덜컹거림(내전 현상)을 제거함.
+
 [수정] cmd_vel Mux 구현 — Manual/Auto 엄격한 제어권 분리
   - /cmd_vel_keyboard  구독 → MANUAL 모드에서만 CAN 전송
   - /cmd_vel_nav2      구독 → AUTO 모드에서만 CAN 전송
@@ -16,12 +20,6 @@ ROS 2 Node: cmd_vel → CAN 8-바이트 4-휠 독립 모터 명령 변환기
 E-Stop (Buzzing 방지):
   - /e_stop (Bool) True → CAN 즉시 정지 + 모든 cmd_vel 무시
   - /e_stop_ack (Bool) 게시 → Nav2에 정지 상태 통보
-
-토픽 구조:
-  keyboard_node → /cmd_vel_keyboard ─┐
-                                      ├→ [mode-aware mux] → CAN (STM32)
-  Nav2 controller → /cmd_vel ────────┘   (launch remapping으로 연결)
-                    (/cmd_vel_nav2로 수신)
 """
 
 import struct
@@ -188,12 +186,15 @@ class MotorNode(Node):
         linear_v  = linear  * self._max_speed
         angular_v = angular * self._max_speed
 
-        # 스키드-스티어 역기구학
-        # 좌측 바퀴: linear + angular, 우측 바퀴: linear - angular
-        fl = int(linear_v + angular_v)
-        fr = int(-linear_v + angular_v)
-        rl = int(linear_v - angular_v)
-        rr = int(-linear_v - angular_v)
+        # [수정됨] 스키드-스티어 역기구학의 정석
+        # 대원칙: 좌측은 좌측끼리, 우측은 우측끼리 완벽히 동일한 명령을 하달
+        left_speed = linear_v - angular_v
+        right_speed = -linear_v - angular_v  # 우측 모터 역결선(-) 반영
+
+        fl = int(left_speed)
+        rl = int(left_speed)
+        fr = int(right_speed)
+        rr = int(right_speed)
 
         N  = self._max_speed
         fl = max(-N, min(N, fl))
@@ -242,3 +243,6 @@ def main(args=None):
     finally:
         node.destroy_node()
         rclpy.shutdown()
+
+if __name__ == '__main__':
+    main()
