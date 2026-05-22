@@ -36,6 +36,7 @@ setup(
             'motor_node     = robot_controller.motor_node:main',
             'avoidance_node = robot_controller.avoidance_node:main',
             'keyboard_node  = robot_controller.keyboard_node:main',
+            'mpu6050_node   = robot_controller.mpu6050_node:main',
         ],
     },
 )
