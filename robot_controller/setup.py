@@ -17,11 +17,15 @@ setup(
         # launch files
         (os.path.join('share', package_name, 'launch'),
          glob('launch/*.launch.py')),
-        # config files (nav2_params.yaml 등)
+        # config files (nav2_params.yaml, ekf.yaml 등)
         (os.path.join('share', package_name, 'config'),
          glob('config/*.yaml')),
+        # maps
         (os.path.join('share', package_name, 'maps'),
          glob('maps/*')),
+        # URDF 모델 파일
+        (os.path.join('share', package_name, 'urdf'),
+         glob('urdf/*.urdf')),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
