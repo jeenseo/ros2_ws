@@ -3,13 +3,20 @@ nav2.launch.py
 ==============
 ROS 2 Nav2 통합 런치 파일 — Raspberry Pi 로컬 실행 전용 (Foxglove Studio)
 
-주요 수정:
-  - sllidar_ros2 (src 기반) 드라이버 통합
-  - ROS_DOMAIN_ID / ROS_DISCOVERY_SERVER 환경변수 완전 제거 (순수 로컬 통신)
-  - 55cm footprint 기반 Nav2 파라미터 연동
-  - [수정] nav2_goal_publisher 완전 제거 → Foxglove에서 직접 NavigateToPose Goal 설정
-  - [수정] motor_node remapping: /cmd_vel_nav2 ← /cmd_vel (Nav2 출력)
-    → motor_node 내부 mode-aware mux에서 AUTO 모드에서만 CAN 전송
+아키텍처:
+  LiDAR → rf2o → /odom_rf2o (TF 없음)
+                         ↓
+  MPU6050 → /imu/data   ↓
+                 EKF (robot_localization)
+                         ↓
+                 /odom + TF(odom→base_footprint) → Nav2
+
+주요 수정 이력:
+  - ROS_DOMAIN_ID / ROS_DISCOVERY_SERVER 제거 (순수 로컬 통신)
+  - motor_node remapping: /cmd_vel_nav2 ← /cmd_vel (Nav2 출력)
+  - [추가] mpu6050_node + IMU TF (base_link → imu_link)
+  - [추가] ekf_node (robot_localization): IMU + LiDAR Odom 융합
+  - [수정] rf2o_node: publish_tf=False, /odom → /odom_rf2o 리맵
 """
 
 import os
@@ -40,6 +47,7 @@ def generate_launch_description():
     # 파일 경로
     nav2_params_file = os.path.join(pkg_dir, 'config', 'nav2_params.yaml')
     map_yaml_file    = os.path.join(pkg_dir, 'maps',   'map.yaml')
+    ekf_yaml_file    = os.path.join(pkg_dir, 'config', 'ekf.yaml')
 
     # ─────────────────────────────────────────────────────────────
     # ── TF 트리 ──────────────────────────────────────────────────
@@ -55,21 +63,31 @@ def generate_launch_description():
         output='screen',
     )
 
-    # TF2: base_link → lidar_link (물리 실측 기반 수정)
-    #
-    # 계산 근거:
-    #   x = +0.160m  : 로봇 중심에서 전방 16cm (실측)
-    #   y =  0.000m  : 좌우 중앙 정렬
-    #   z = +0.355m  : 로봇 3D 중심 높이(61cm/2=30.5cm) + LiDAR 오프셋(+5cm) = 35.5cm
-    #
-    # rotation (qx,qy,qz,qw) = (0,0,0,1): identity (회전 없음)
-    #   ※ LiDAR가 물리적으로 뒤집혀 마운트된 경우 qz=1, qw=0 (yaw=180°)으로 변경
+    # TF2: base_link → lidar_link (물리 실측 기반)
+    #   x=+0.160m : 로봇 중심에서 전방 16cm
+    #   z=+0.355m : 로봇 3D 중심(30.5cm) + LiDAR 오프셋(5cm)
+    #   yaw=180° (3.14159 rad): LiDAR 물리적 방향 반전 보정
     tf_base_to_lidar = Node(
         package='tf2_ros',
         executable='static_transform_publisher',
         name='base_to_lidar_tf',
-        arguments=['0.160', '0.0', '0.355', '3.14159', '0.0', '0.0', 'base_link', 'lidar_link'],
-        output='screen'
+        arguments=['0.160', '0.0', '0.355', '3.14159', '0.0', '0.0',
+                   'base_link', 'lidar_link'],
+        output='screen',
+    )
+
+    # TF3: base_link → imu_link (MPU6050 위치)
+    #   x=+0.160m : LiDAR와 동일한 전방 위치
+    #   y=  0.000m: 중앙
+    #   z=+0.325m : lidar_link(0.355m)에서 3cm 아래 = 0.355 - 0.030 = 0.325m
+    #   rotation  : identity (회전 없음)
+    tf_base_to_imu = Node(
+        package='tf2_ros',
+        executable='static_transform_publisher',
+        name='base_to_imu_tf',
+        arguments=['0.160', '0.0', '0.325', '0', '0', '0', '1',
+                   'base_link', 'imu_link'],
+        output='screen',
     )
 
     # ─────────────────────────────────────────────────────────────
@@ -86,7 +104,24 @@ def generate_launch_description():
             'frame_id':         'lidar_link',
             'inverted':         False,
             'angle_compensate': True,
-            'scan_mode':        'Standard',  # 'Standard' 또는 'Express' (모델에 따라 다름)
+            'scan_mode':        'Standard',
+        }],
+    )
+
+    # ─────────────────────────────────────────────────────────────
+    # ── IMU: MPU6050 ─────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────
+    mpu6050_node = Node(
+        package='robot_controller',
+        executable='mpu6050_node',
+        name='mpu6050_node',
+        output='screen',
+        parameters=[{
+            'i2c_bus':    1,
+            'i2c_address': 0x68,
+            'publish_hz': 20.0,
+            'frame_id':   'imu_link',
+            'alpha':      0.98,
         }],
     )
 
@@ -104,15 +139,16 @@ def generate_launch_description():
             'can_id':      0x123,
             'max_speed':   9999,
         }],
-        # [핵심 remapping]
-        # motor_node 내부: /cmd_vel_nav2 구독
-        # 실제 ROS 그래프: Nav2 controller가 게시하는 /cmd_vel 수신
-        # → motor_node의 mode-aware mux가 AUTO 모드에서만 CAN 전달
+        # Nav2의 /cmd_vel 출력을 /cmd_vel_nav2로 수신
+        # → motor_node 내부 mux가 AUTO 모드에서만 CAN 전달
         remappings=[('/cmd_vel_nav2', '/cmd_vel')],
     )
+
     # ─────────────────────────────────────────────────────────────
-    # ── 오도메트리: rf2o (엔코더 없는 스캔 매칭) ──────────────────
+    # ── 오도메트리: rf2o (LiDAR 스캔 매칭) ───────────────────────
     # ─────────────────────────────────────────────────────────────
+    # [수정] publish_tf=False: EKF가 odom→base_footprint TF 담당
+    # [수정] /odom → /odom_rf2o 리맵: EKF가 이 토픽을 odom0으로 구독
     rf2o_node = Node(
         package='rf2o_laser_odometry',
         executable='rf2o_laser_odometry_node',
@@ -120,13 +156,29 @@ def generate_launch_description():
         output='screen',
         parameters=[{
             'laser_scan_topic':     '/scan',
-            'odom_topic':           '/odom',
-            'publish_tf':           True,
+            'odom_topic':           '/odom_rf2o',  # EKF 입력용 토픽명
+            'publish_tf':           False,          # EKF가 TF 발행 담당
             'base_frame_id':        'base_footprint',
             'odom_frame_id':        'odom',
             'init_pose_from_topic': '',
             'freq':                 15.0,
         }],
+    )
+
+    # ─────────────────────────────────────────────────────────────
+    # ── EKF: robot_localization (IMU + LiDAR Odom 융합) ──────────
+    # ─────────────────────────────────────────────────────────────
+    # EKF가 odom→base_footprint TF를 발행하며 /odom 토픽을 게시함
+    ekf_node = Node(
+        package='robot_localization',
+        executable='ekf_node',
+        name='ekf_node',
+        output='screen',
+        parameters=[ekf_yaml_file],
+        remappings=[
+            # EKF 출력 /odometry/filtered → Nav2가 구독하는 /odom으로 리맵
+            ('/odometry/filtered', '/odom'),
+        ],
     )
 
     # ─────────────────────────────────────────────────────────────
@@ -164,7 +216,7 @@ def generate_launch_description():
     )
 
     # ─────────────────────────────────────────────────────────────
-    # ── Nav2 네비게이션 스택 (55cm footprint 파라미터 연동) ────────
+    # ── Nav2 네비게이션 스택 ──────────────────────────────────────
     # ─────────────────────────────────────────────────────────────
     nav2_bringup_dir = FindPackageShare('nav2_bringup')
 
@@ -188,13 +240,16 @@ def generate_launch_description():
         # TF 트리
         tf_footprint_to_base,
         tf_base_to_lidar,
+        tf_base_to_imu,          # [추가] base_link → imu_link
 
-        # 하드웨어 (lidar, motor)
+        # 하드웨어 (lidar, IMU, motor)
         lidar_node,
+        mpu6050_node,            # [추가] MPU6050 IMU
         motor_node,
 
-        # 오도메트리
-        rf2o_node,
+        # 오도메트리 + EKF 융합
+        rf2o_node,               # [수정] publish_tf=False, /odom_rf2o
+        ekf_node,                # [추가] IMU + LiDAR Odom → /odom + TF
 
         # 위치 추정 (map + AMCL)
         map_server_node,
