@@ -181,57 +181,52 @@ class MotorNode(Node):
         self._apply_twist(msg)
 
     # ──────────────────────────────────────────────────────────────
-    # ── Mecanum X-configuration IK → 4-휠 CAN 명령 변환 ──────────
+    # ── Mecanum O-구성 IK → 4-휠 CAN 명령 변환 ───────────────────
     # ──────────────────────────────────────────────────────────────
     def _apply_twist(self, msg: Twist) -> None:
         """
-        ROS 2 Twist → 메카넘 X-구성 IK → STM32 CAN 속도값 변환.
+        ROS 2 Twist → 메카넘 O-구성 IK → STM32 CAN 속도값 변환.
 
-        입력:
-          Vx = msg.linear.x   : 전진/후진 (-1.0 ~ +1.0)
-          Vy = 0.0            : 스트레이핑 강제 비활성화
-          Wz = msg.angular.z  : 좌/우 회전 (-1.0 ~ +1.0)
+        [하드웨어 분석 — 실험 데이터 기반]
 
-        메카넘 X-구성 IK (Vy=0 적용):
-          FL = Vx + Vy - Wz = Vx - Wz
-          FR = Vx - Vy + Wz = Vx + Wz
-          RL = Vx - Vy - Wz = Vx - Wz  (후륜 역결선 보정: -RL 전송)
-          RR = Vx + Vy + Wz = Vx + Wz  (후륜 역결선 보정: -RR 전송)
+        Test 1: CAN[1,1,1,1] → 제자리 회전
+          → 이 로봇은 Mecanum O-구성 (O-config) 동작
+          → 표준 X-config에서 [1,1,1,1] = 전진이지만, 이 로봇은 회전 발생
 
-        STM32 CAN 전송값 (투명 패스스루 기준):
-          FL_can = +(Vx - Wz) × MAX_SPEED
-          FR_can = +(Vx + Wz) × MAX_SPEED
-          RL_can = -(Vx - Wz) × MAX_SPEED  ← 후륜 역결선 보정
-          RR_can = -(Vx + Wz) × MAX_SPEED  ← 후륜 역결선 보정
+        Test 2: CAN[FL=+, RL=-, FR=-, RR=+] → 직진 전진
+          → 하드웨어 역결선 확인:
+               FL: 양수 = 전진 (정상 결선)
+               FR: 음수 = 전진 (역결선)
+               RL: 음수 = 전진 (역결선)
+               RR: 양수 = 전진 (정상 결선)
+
+        [최종 IK 공식 — O-구성 + 역결선 보정 + ROS2 부호 규칙]
+
+          fl_can = +(Vx - Wz) × N
+          fr_can = -(Vx + Wz) × N   ← FR 역결선: 부호 반전
+          rl_can = -(Vx - Wz) × N   ← RL 역결선: 부호 반전
+          rr_can = +(Vx + Wz) × N
+
+        [동작 검증]
+          W 전진  (Vx=+1): FL=+N, FR=-N, RL=-N, RR=+N → 4바퀴 전진 ✓
+          A 좌회전(Wz=+1): FL=-N, FR=-N, RL=+N, RR=+N → 좌측 후진, 우측 전진(CCW) ✓
+          D 우회전(Wz=-1): FL=+N, FR=+N, RL=-N, RR=-N → 좌측 전진, 우측 후진(CW) ✓
+          S 후진  (Vx=-1): FL=-N, FR=+N, RL=+N, RR=-N → 4바퀴 후진 ✓
         """
-        # ── 입력 파싱 및 클램프 ───────────────────────────────────
+        # ── 입력 파싱 및 클램프 [-1.0, +1.0] ─────────────────────
         Vx = max(-1.0, min(1.0, float(msg.linear.x)))
-        Vy = 0.0   # 메카넘 스트레이핑 강제 비활성화 (linear.y 무시)
+        Vy = 0.0   # 스트레이핑 강제 비활성화 (linear.y 완전 무시)
         Wz = max(-1.0, min(1.0, float(msg.angular.z)))
-
-        # ── 메카넘 X-구성 IK (정규화 속도) ───────────────────────
-        # 표준 공식: FL=Vx+Vy-Wz, FR=Vx-Vy+Wz, RL=Vx-Vy-Wz, RR=Vx+Vy+Wz
-        # Vy=0 적용 시:
-        FL = Vx - Wz   # 전륜-좌 (IK 결과)
-        FR = Vx + Wz   # 전륜-우 (IK 결과)
-        RL = Vx - Wz   # 후륜-좌 (IK 결과, 역결선 보정 전)
-        RR = Vx + Wz   # 후륜-우 (IK 결과, 역결선 보정 전)
-
-        # 합산 후 클램프 (|v| > 1.0 가능)
-        FL = max(-1.0, min(1.0, FL))
-        FR = max(-1.0, min(1.0, FR))
-        RL = max(-1.0, min(1.0, RL))
-        RR = max(-1.0, min(1.0, RR))
 
         N = self._max_speed   # 9999
 
-        # ── STM32 CAN 전송값 계산 ─────────────────────────────────
-        # 전륜 (htim1): 정상 결선 → IK 결과 그대로 적용
-        # 후륜 (htim2): 역결선 → STM32 투명 패스스루이므로 Python이 부호 반전
-        fl_can = int( FL * N)   # 전륜-좌: 그대로
-        fr_can = int( FR * N)   # 전륜-우: 그대로
-        rl_can = int(-RL * N)   # 후륜-좌: 역결선 보정 (부호 반전)
-        rr_can = int(-RR * N)   # 후륜-우: 역결선 보정 (부호 반전)
+        # ── O-구성 IK + 하드웨어 역결선 보정 ─────────────────────
+        # FL/RR: 정상 결선 → 부호 그대로
+        # FR/RL: 역결선 → 부호 반전 (STM32 투명 패스스루이므로 Python 담당)
+        fl_can = int( (Vx - Wz) * N)   # 전륜-좌: 정상 결선
+        fr_can = int(-(Vx + Wz) * N)   # 전륜-우: 역결선 보정
+        rl_can = int(-(Vx - Wz) * N)   # 후륜-좌: 역결선 보정
+        rr_can = int( (Vx + Wz) * N)   # 후륜-우: 정상 결선
 
         # 최종 클램프 (정수 범위 보장)
         fl_can = max(-N, min(N, fl_can))
