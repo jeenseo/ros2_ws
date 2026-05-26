@@ -1,38 +1,43 @@
 """
 motor_node.py
 =============
-ROS 2 Node: Skid-Steer IK → CAN 8-바이트 4-휠 모터 명령 변환기
+ROS 2 Node: Mecanum Wheel IK → CAN 8-바이트 4-휠 모터 명령 변환기
 
-[스키드-스티어 역기구학 (IK)]
+[하드웨어 구성]
+  바퀴 유형: 메카넘 X-구성 (Mecanum X-configuration)
+  STM32 firmware: 투명 패스스루 (Transparent Pass-Through)
+    → 내부 부호 보정 없음. 모든 IK 및 방향 보정은 Python 담당.
 
-  STM32 motor.c는 이제 투명한 패스스루(Transparent Pass-Through).
-  전륜(htim1)은 양수=전진으로 정상 결선.
-  후륜(htim2)은 하드웨어 역결선 → Python이 부호 반전을 담당.
+[메카넘 X-구성 IK 공식]
+  표준 메카넘 X-구성 역기구학 행렬:
+    FL = Vx + Vy - Wz
+    FR = Vx - Vy + Wz
+    RL = Vx - Vy - Wz
+    RR = Vx + Vy + Wz
 
-  ROS 2 Twist 입력:
-    linear.x  > 0 → 전진
-    linear.x  < 0 → 후진
-    angular.z > 0 → 좌회전 (CCW)
-    angular.z < 0 → 우회전 (CW)
-    linear.y  = 무시 (스키드-스티어는 스트레이핑 불가)
+  Vy (스트레이핑) 강제 0 적용:
+    FL = Vx + 0 - Wz = Vx - Wz
+    FR = Vx - 0 + Wz = Vx + Wz
+    RL = Vx - 0 - Wz = Vx - Wz
+    RR = Vx + 0 + Wz = Vx + Wz
 
-  4-휠 IK 계산:
-    v_left  = linear - angular   (angular>0 = 좌회전 = 좌측 후진)
-    v_right = linear + angular   (angular>0 = 좌회전 = 우측 전진)
+[하드웨어 역결선 보정 (STM32 투명 패스스루)]
+  전륜 (htim1): 양수 = 전진 (정상 결선)
+  후륜 (htim2): 역결선 → 양수 = 후진 → Python이 부호 반전 담당
 
-    FL = +v_left   × MAX_SPEED  (전륜-좌: 정상 결선)
-    FR = +v_right  × MAX_SPEED  (전륜-우: 정상 결선)
-    RL = -v_left   × MAX_SPEED  (후륜-좌: 역결선 보정 → 부호 반전)
-    RR = -v_right  × MAX_SPEED  (후륜-우: 역결선 보정 → 부호 반전)
+  STM32 CAN 전송 최종값:
+    FL_can = +(Vx - Wz) × MAX_SPEED  (전륜-좌: 보정 불필요)
+    FR_can = +(Vx + Wz) × MAX_SPEED  (전륜-우: 보정 불필요)
+    RL_can = -(Vx - Wz) × MAX_SPEED  (후륜-좌: 역결선 보정 → 부호 반전)
+    RR_can = -(Vx + Wz) × MAX_SPEED  (후륜-우: 역결선 보정 → 부호 반전)
 
-  검증:
-    전진 (linear=+1):  FL=+MAX, FR=+MAX, RL=-MAX, RR=-MAX ✓
-    좌회전 (angular=+1): FL=-MAX, FR=+MAX, RL=+MAX, RR=-MAX ✓
-    우회전 (angular=-1): FL=+MAX, FR=-MAX, RL=-MAX, RR=+MAX ✓
+[동작 검증 (Vy=0)]
+  W 전진 (Vx=+1): FL=+N  FR=+N  RL=-N  RR=-N → 4바퀴 모두 전진 방향 ✓
+  A 좌회전 (Wz=+1): FL=-N FR=+N  RL=+N  RR=-N → 좌측 후진, 우측 전진 ✓
+  D 우회전 (Wz=-1): FL=+N FR=-N  RL=-N  RR=+N → 좌측 전진, 우측 후진 ✓
 
 [CAN 프로토콜]
-  8바이트 Big-Endian:  [FL(2)] [FR(2)] [RL(2)] [RR(2)]
-  STM32 수신 후 Motor_Drive(fl, fr, rl, rr) 호출
+  8바이트 Big-Endian: [FL(2B)][FR(2B)][RL(2B)][RR(2B)]
 
 [cmd_vel Mux]
   /cmd_vel_keyboard → MANUAL 모드에서만 CAN 전송
@@ -94,17 +99,13 @@ class MotorNode(Node):
             self.get_logger().fatal(f'CAN 버스 초기화 실패: {exc}')
             raise
 
-        # ── 구독: /cmd_vel_keyboard (keyboard_node 출력) ─────────
+        # ── 구독 ─────────────────────────────────────────────────
         self._sub_keyboard = self.create_subscription(
             Twist, '/cmd_vel_keyboard', self._keyboard_cb, _CMD_VEL_QOS,
         )
-
-        # ── 구독: /cmd_vel_nav2 (Nav2 출력, launch remapping) ─────
         self._sub_nav2 = self.create_subscription(
             Twist, '/cmd_vel_nav2', self._nav2_cb, _CMD_VEL_QOS,
         )
-
-        # ── 구독: /mode, /e_stop ──────────────────────────────────
         self._sub_mode = self.create_subscription(
             String, '/mode', self._mode_cb, 10
         )
@@ -116,9 +117,9 @@ class MotorNode(Node):
         self._pub_estop_ack = self.create_publisher(Bool, '/e_stop_ack', 10)
 
         self.get_logger().info(
-            'MotorNode 준비 완료 (Skid-Steer IK + 후륜 역결선 보정)\n'
-            '  IK: v_left=linear-angular, v_right=linear+angular\n'
-            '  RL/RR 부호 반전 (하드웨어 역결선 보정)\n'
+            'MotorNode 준비 완료 (Mecanum X-config IK + 후륜 역결선 보정)\n'
+            '  IK: FL=Vx-Wz, FR=Vx+Wz (Vy=0 강제)\n'
+            '  CAN: FL_can=+FL, FR_can=+FR, RL_can=-FL, RR_can=-FR\n'
             '  /cmd_vel_keyboard → MANUAL 모드\n'
             '  /cmd_vel_nav2     → AUTO   모드'
         )
@@ -133,8 +134,7 @@ class MotorNode(Node):
 
         if old != msg.data:
             self.get_logger().info(f'[MODE] {old} → {msg.data}')
-            # 모드 전환 순간 즉시 정지 → 잔류 속도 제거
-            self._send_can(0, 0, 0, 0)
+            self._send_can(0, 0, 0, 0)   # 모드 전환 즉시 정지
 
     # ──────────────────────────────────────────────────────────────
     # ── /e_stop 콜백 ──────────────────────────────────────────────
@@ -160,7 +160,7 @@ class MotorNode(Node):
     def _keyboard_cb(self, msg: Twist) -> None:
         with self._mode_lock:
             if self._mode != 'MANUAL':
-                return   # AUTO 모드: 키보드 완전 차단
+                return
         with self._estop_lock:
             if self._is_estopped:
                 self._send_can(0, 0, 0, 0)
@@ -173,7 +173,7 @@ class MotorNode(Node):
     def _nav2_cb(self, msg: Twist) -> None:
         with self._mode_lock:
             if self._mode != 'AUTO':
-                return   # MANUAL 모드: Nav2 완전 차단
+                return
         with self._estop_lock:
             if self._is_estopped:
                 self._send_can(0, 0, 0, 0)
@@ -181,58 +181,68 @@ class MotorNode(Node):
         self._apply_twist(msg)
 
     # ──────────────────────────────────────────────────────────────
-    # ── Skid-Steer IK → 4-휠 CAN 명령 변환 ──────────────────────
+    # ── Mecanum X-configuration IK → 4-휠 CAN 명령 변환 ──────────
     # ──────────────────────────────────────────────────────────────
     def _apply_twist(self, msg: Twist) -> None:
         """
-        ROS 2 Twist → 4-휠 스키드-스티어 CAN 속도값 변환.
+        ROS 2 Twist → 메카넘 X-구성 IK → STM32 CAN 속도값 변환.
 
         입력:
-          msg.linear.x  : 전진/후진 속도 (-1.0 ~ +1.0 정규화)
-          msg.angular.z : 회전 속도   (-1.0 ~ +1.0 정규화)
-          msg.linear.y  : 무시 (스키드-스티어 불가)
+          Vx = msg.linear.x   : 전진/후진 (-1.0 ~ +1.0)
+          Vy = 0.0            : 스트레이핑 강제 비활성화
+          Wz = msg.angular.z  : 좌/우 회전 (-1.0 ~ +1.0)
 
-        스키드-스티어 IK:
-          v_left  = linear - angular
-          v_right = linear + angular
+        메카넘 X-구성 IK (Vy=0 적용):
+          FL = Vx + Vy - Wz = Vx - Wz
+          FR = Vx - Vy + Wz = Vx + Wz
+          RL = Vx - Vy - Wz = Vx - Wz  (후륜 역결선 보정: -RL 전송)
+          RR = Vx + Vy + Wz = Vx + Wz  (후륜 역결선 보정: -RR 전송)
 
-        STM32 Motor_Drive CAN 값:
-          FL = +v_left  * MAX_SPEED  (전륜-좌: 정상 결선)
-          FR = +v_right * MAX_SPEED  (전륜-우: 정상 결선)
-          RL = -v_left  * MAX_SPEED  (후륜-좌: 역결선 → 부호 반전)
-          RR = -v_right * MAX_SPEED  (후륜-우: 역결선 → 부호 반전)
+        STM32 CAN 전송값 (투명 패스스루 기준):
+          FL_can = +(Vx - Wz) × MAX_SPEED
+          FR_can = +(Vx + Wz) × MAX_SPEED
+          RL_can = -(Vx - Wz) × MAX_SPEED  ← 후륜 역결선 보정
+          RR_can = -(Vx + Wz) × MAX_SPEED  ← 후륜 역결선 보정
         """
-        # 입력 클램프 [-1.0, +1.0]
-        linear  = max(-1.0, min(1.0, float(msg.linear.x)))
-        angular = max(-1.0, min(1.0, float(msg.angular.z)))
-        # linear.y 는 완전 무시 (스키드-스티어)
+        # ── 입력 파싱 및 클램프 ───────────────────────────────────
+        Vx = max(-1.0, min(1.0, float(msg.linear.x)))
+        Vy = 0.0   # 메카넘 스트레이핑 강제 비활성화 (linear.y 무시)
+        Wz = max(-1.0, min(1.0, float(msg.angular.z)))
 
-        # ── 좌/우 측 속도 계산 (정규화) ──────────────────────────
-        v_left  = linear - angular   # angular > 0 (좌회전) → 좌측 속도 감소
-        v_right = linear + angular   # angular > 0 (좌회전) → 우측 속도 증가
+        # ── 메카넘 X-구성 IK (정규화 속도) ───────────────────────
+        # 표준 공식: FL=Vx+Vy-Wz, FR=Vx-Vy+Wz, RL=Vx-Vy-Wz, RR=Vx+Vy+Wz
+        # Vy=0 적용 시:
+        FL = Vx - Wz   # 전륜-좌 (IK 결과)
+        FR = Vx + Wz   # 전륜-우 (IK 결과)
+        RL = Vx - Wz   # 후륜-좌 (IK 결과, 역결선 보정 전)
+        RR = Vx + Wz   # 후륜-우 (IK 결과, 역결선 보정 전)
 
         # 합산 후 클램프 (|v| > 1.0 가능)
-        v_left  = max(-1.0, min(1.0, v_left))
-        v_right = max(-1.0, min(1.0, v_right))
+        FL = max(-1.0, min(1.0, FL))
+        FR = max(-1.0, min(1.0, FR))
+        RL = max(-1.0, min(1.0, RL))
+        RR = max(-1.0, min(1.0, RR))
 
         N = self._max_speed   # 9999
 
-        # ── 4-휠 CAN 속도값 계산 ─────────────────────────────────
-        fl = int( v_left  * N)   # 전륜-좌: 그대로 적용
-        fr = int( v_right * N)   # 전륜-우: 그대로 적용
-        rl = int(-v_left  * N)   # 후륜-좌: 역결선 보정 (부호 반전)
-        rr = int(-v_right * N)   # 후륜-우: 역결선 보정 (부호 반전)
+        # ── STM32 CAN 전송값 계산 ─────────────────────────────────
+        # 전륜 (htim1): 정상 결선 → IK 결과 그대로 적용
+        # 후륜 (htim2): 역결선 → STM32 투명 패스스루이므로 Python이 부호 반전
+        fl_can = int( FL * N)   # 전륜-좌: 그대로
+        fr_can = int( FR * N)   # 전륜-우: 그대로
+        rl_can = int(-RL * N)   # 후륜-좌: 역결선 보정 (부호 반전)
+        rr_can = int(-RR * N)   # 후륜-우: 역결선 보정 (부호 반전)
 
         # 최종 클램프 (정수 범위 보장)
-        fl = max(-N, min(N, fl))
-        fr = max(-N, min(N, fr))
-        rl = max(-N, min(N, rl))
-        rr = max(-N, min(N, rr))
+        fl_can = max(-N, min(N, fl_can))
+        fr_can = max(-N, min(N, fr_can))
+        rl_can = max(-N, min(N, rl_can))
+        rr_can = max(-N, min(N, rr_can))
 
-        self._send_can(fl, fr, rl, rr)
+        self._send_can(fl_can, fr_can, rl_can, rr_can)
         self.get_logger().debug(
-            f'[IK] lin={linear:+.3f} ang={angular:+.3f} | '
-            f'FL={fl:+6d} FR={fr:+6d} RL={rl:+6d} RR={rr:+6d}'
+            f'[IK] Vx={Vx:+.3f} Wz={Wz:+.3f} | '
+            f'FL={fl_can:+6d} FR={fr_can:+6d} RL={rl_can:+6d} RR={rr_can:+6d}'
         )
 
     # ──────────────────────────────────────────────────────────────
@@ -241,7 +251,7 @@ class MotorNode(Node):
     def _send_can(self, fl: int, fr: int, rl: int, rr: int) -> None:
         """8-바이트 Big-Endian CAN 프레임 전송.
         형식: [FL(2B)][FR(2B)][RL(2B)][RR(2B)]
-        STM32 Motor_Drive(fl, fr, rl, rr) 호출됨.
+        STM32 Motor_Drive(fl, fr, rl, rr) 직접 호출.
         """
         data = struct.pack('>hhhh', fl, fr, rl, rr)
         msg  = can.Message(
@@ -257,7 +267,7 @@ class MotorNode(Node):
     # ── 노드 소멸 ─────────────────────────────────────────────────
     def destroy_node(self):
         try:
-            self._send_can(0, 0, 0, 0)   # 긴급 정지
+            self._send_can(0, 0, 0, 0)
             self._bus.shutdown()
         except Exception:
             pass

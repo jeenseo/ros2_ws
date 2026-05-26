@@ -1,26 +1,26 @@
 """
 keyboard_node.py
 ================
-ROS 2 Node: 터미널 키보드 제어 — 스키드-스티어 전용
+ROS 2 Node: 터미널 키보드 제어 — 메카넘/스키드-스티어 공용 (Vy=0 고정)
 
-[스키드-스티어 명령 분리 정책]
-  W / ↑  : 전진  → linear.x  = +spd  (angular.z = 독립)
-  S / ↓  : 후진  → linear.x  = -spd  (angular.z = 독립)
-  A / ←  : 좌회전 → angular.z = +spd (linear.x = 독립)
-  D / →  : 우회전 → angular.z = -spd (linear.x = 독립)
-  linear.y = 항상 0.0 (스키드-스티어는 스트레이핑 불가)
-  b / B  : 속도 Normal(2000) ↔ Boost(4000) 토글
-  m / M  : MANUAL ↔ AUTO 모드 전환
-  Ctrl+C : 종료
+[ROS 2 표준 명령 매핑]
+  W / ↑  : 전진  → linear.x  = +spd
+  S / ↓  : 후진  → linear.x  = -spd
+  A / ←  : 좌회전 → angular.z = +spd (CCW, ROS 2 표준)
+  D / →  : 우회전 → angular.z = -spd (CW)
+  linear.y = 항상 0.0 고정 (스트레이핑 비활성화)
 
-[MANUAL 모드 동작]
-  - 20Hz 타이머가 /cmd_vel_keyboard 에 Twist 게시
-  - 키 미입력 시 Twist(0,0,0) 게시 → 모터 안정 정지
-  - W+A 동시 입력 = 전진 + 좌회전 가능 (자연스러운 스키드-스티어)
+[특징]
+  - W/S는 linear.x만 제어 (angular.z 독립)
+  - A/D는 angular.z만 제어 (linear.x 독립)
+  - W+A 동시 입력 가능 = 전진 + 좌회전 (자연스러운 조작)
+  - 20Hz 타이머: 키 미입력 시 Twist(0,0,0) 게시 → 모터 안정 정지
+  - b/B: 속도 Normal(2000) ↔ Boost(4000) 토글
+  - m/M: MANUAL ↔ AUTO 모드 전환
 
 [토픽]
-  /cmd_vel_keyboard  (geometry_msgs/Twist) — MANUAL 모드에서만
-  /mode              (std_msgs/String)     — "MANUAL" | "AUTO"
+  게시: /cmd_vel_keyboard (Twist) — MANUAL 모드에서만
+  게시: /mode              (String) — "MANUAL" | "AUTO"
 """
 
 import atexit
@@ -39,7 +39,7 @@ from std_msgs.msg import String
 
 
 # ── 속도 레벨 ─────────────────────────────────────────────────────
-SPEED_NORMAL = 2000 / 9999   # ≈ 0.2002  (motor_node 내부에서 × 9999)
+SPEED_NORMAL = 2000 / 9999   # ≈ 0.2002
 SPEED_BOOST  = 4000 / 9999   # ≈ 0.4001
 
 
@@ -56,14 +56,13 @@ class KeyboardNode(Node):
         self._spd_boost  = self.get_parameter('boost_speed').value
 
         # ── 토픽 게시자 ───────────────────────────────────────────
-        # /cmd_vel_keyboard: motor_node의 MANUAL 전용 구독 토픽
         self._cmd_pub  = self.create_publisher(Twist,  '/cmd_vel_keyboard', 10)
         self._mode_pub = self.create_publisher(String, '/mode',             10)
 
         # ── 공유 상태 ─────────────────────────────────────────────
         self._mode       = 'MANUAL'
         self._speed_mode = 'normal'
-        self._keys       = set()       # 현재 활성 키 집합
+        self._keys       = set()
         self._key_lock   = threading.Lock()
         self._orig_term  = None
 
@@ -72,15 +71,13 @@ class KeyboardNode(Node):
         kb_t.start()
 
         # ── 20Hz 명령 게시 타이머 ─────────────────────────────────
-        # MANUAL 모드에서 키 미입력 시에도 Twist(0,0,0) 게시
-        # → motor_node가 CAN(0,0,0,0)을 20Hz로 수신 → 모터 안정 정지
         self._timer = self.create_timer(1.0 / 20.0, self._publish_cmd)
 
         self.get_logger().info(
-            'KeyboardNode 준비 완료 (Skid-Steer 전용)\n'
-            '  W/↑ = 전진  S/↓ = 후진  A/← = 좌회전  D/→ = 우회전\n'
-            '  linear.y = 0 고정 (스트레이핑 비활성화)\n'
-            '  m = MANUAL↔AUTO  b = Normal↔Boost  Ctrl+C = 종료'
+            'KeyboardNode 준비 완료\n'
+            '  W/↑=전진  S/↓=후진  A/←=좌회전  D/→=우회전\n'
+            '  linear.y = 0.0 고정 (스트레이핑 비활성화)\n'
+            '  m=MANUAL↔AUTO  b=Normal↔Boost  Ctrl+C=종료'
         )
         self._publish_mode()
 
@@ -104,10 +101,10 @@ class KeyboardNode(Node):
     # ── 키보드 루프 (백그라운드 데몬 스레드) ─────────────────────
     def _keyboard_loop(self) -> None:
         """
-        비동기 멀티키 입력 처리 (50ms 폴, 버퍼 드레인):
-          1. select.select(timeout=0.05) — 50ms 대기
-          2. 입력 있으면 버퍼 드레인 → 이번 프레임 키 집합 구성
-          3. timeout이면 키 집합 비움 (릴리즈 → zero velocity)
+        비동기 멀티키 입력:
+          1. 50ms 폴 (select)
+          2. 입력 → 버퍼 드레인 → 키 집합 구성
+          3. 타임아웃 → 키 집합 클리어 (zero velocity 전환)
         """
         ESCAPE_MAP = {
             '[A': 'W',   # ↑ = 전진
@@ -126,12 +123,10 @@ class KeyboardNode(Node):
                 ready, _, _ = select.select([sys.stdin], [], [], 0.05)
 
                 if not ready:
-                    # 50ms 내 입력 없음 → 키 릴리즈 처리
                     with self._key_lock:
                         self._keys.clear()
                     continue
 
-                # ── 버퍼 드레인: 이번 프레임 모든 바이트 읽기 ────
                 current_frame: set = set()
                 esc_pending = False
 
@@ -160,14 +155,12 @@ class KeyboardNode(Node):
                         esc_pending = False
 
                     elif ch in ('m', 'M'):
-                        # MANUAL ↔ AUTO 전환
                         self._mode = 'AUTO' if self._mode == 'MANUAL' else 'MANUAL'
                         self.get_logger().info(f'[MODE] → {self._mode}')
                         self._publish_mode()
-                        current_frame.clear()   # 전환 순간 키 클리어
+                        current_frame.clear()
 
                     elif ch in ('b', 'B'):
-                        # 속도 토글
                         self._speed_mode = (
                             'boost' if self._speed_mode == 'normal' else 'normal'
                         )
@@ -177,15 +170,15 @@ class KeyboardNode(Node):
                             f'({int(val * 9999)} / 9999)'
                         )
 
-                    # ── 이동 키 (스키드-스티어 전용) ───────────────
+                    # ── 이동 키 ───────────────────────────────────
                     elif ch in ('w', 'W'):
-                        current_frame.add('W')   # 전진 (linear.x)
+                        current_frame.add('W')   # linear.x +
                     elif ch in ('s', 'S'):
-                        current_frame.add('S')   # 후진 (linear.x)
+                        current_frame.add('S')   # linear.x -
                     elif ch in ('a', 'A'):
-                        current_frame.add('A')   # 좌회전 (angular.z)
+                        current_frame.add('A')   # angular.z +
                     elif ch in ('d', 'D'):
-                        current_frame.add('D')   # 우회전 (angular.z)
+                        current_frame.add('D')   # angular.z -
 
                 with self._key_lock:
                     self._keys = current_frame
@@ -198,39 +191,40 @@ class KeyboardNode(Node):
     def _publish_cmd(self) -> None:
         """
         MANUAL 모드에서 20Hz로 /cmd_vel_keyboard 게시.
-        키 미입력 시 Twist(0,0,0) → motor_node → CAN(0,0,0,0) → 모터 정지.
 
-        [스키드-스티어 명령 분리]
-          W/S → linear.x  (전진/후진)
-          A/D → angular.z (좌/우 회전)
-          linear.y = 항상 0.0 (스트레이핑 비활성화)
+        축 매핑 (ROS 2 표준):
+          W/S → msg.linear.x   (전진/후진)
+          A/D → msg.angular.z  (좌/우 회전, CCW=+)
+          msg.linear.y = 0.0   (스트레이핑 항상 0)
+
+        키 미입력 시 Twist(0,0,0) 게시 → motor_node → CAN(0,0,0,0) → 모터 정지
         """
         if self._mode != 'MANUAL':
-            return   # AUTO 모드: Nav2가 /cmd_vel 제어
+            return
 
         with self._key_lock:
             keys = set(self._keys)
 
         spd = self._spd_boost if self._speed_mode == 'boost' else self._spd_normal
 
-        # ── 전진/후진: linear.x (W/S) ────────────────────────────
+        # ── W/S → linear.x (전진/후진) ───────────────────────────
         linear_x = 0.0
         if 'W' in keys:
             linear_x += spd
         if 'S' in keys:
             linear_x -= spd
 
-        # ── 좌/우 회전: angular.z (A/D) ──────────────────────────
+        # ── A/D → angular.z (좌/우 회전) ─────────────────────────
         angular_z = 0.0
         if 'A' in keys:
-            angular_z += spd   # 좌회전 (+CCW)
+            angular_z += spd   # 좌회전 CCW (+)
         if 'D' in keys:
-            angular_z -= spd   # 우회전 (-CW)
+            angular_z -= spd   # 우회전 CW  (-)
 
         # ── Twist 메시지 구성 ─────────────────────────────────────
         msg = Twist()
         msg.linear.x  = max(-1.0, min(1.0, linear_x))
-        msg.linear.y  = 0.0   # 스키드-스티어: 스트레이핑 고정 비활성화
+        msg.linear.y  = 0.0   # 스트레이핑 완전 비활성화 (메카넘 Vy=0)
         msg.linear.z  = 0.0
         msg.angular.x = 0.0
         msg.angular.y = 0.0
