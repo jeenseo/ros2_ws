@@ -1,25 +1,46 @@
 """
 motor_node.py
 =============
-ROS 2 Node: cmd_vel → CAN 8-바이트 4-휠 독립 모터 명령 변환기
+ROS 2 Node: Skid-Steer IK → CAN 8-바이트 4-휠 모터 명령 변환기
 
-[수정] 스키드-스티어(Skid-Steer) 구동 방식 완벽 적용
-  - 좌측 바퀴(FL, RL)와 우측 바퀴(FR, RR)의 속도를 각각 완벽히 동기화하여
-    내부 마찰 및 덜컹거림(내전 현상)을 제거함.
+[스키드-스티어 역기구학 (IK)]
 
-[수정] cmd_vel Mux 구현 — Manual/Auto 엄격한 제어권 분리
-  - /cmd_vel_keyboard  구독 → MANUAL 모드에서만 CAN 전송
-  - /cmd_vel_nav2      구독 → AUTO 모드에서만 CAN 전송
-    (launch 파일 remapping: /cmd_vel_nav2 → /cmd_vel (Nav2 출력))
-  - 모드 전환 즉시 정지 명령 전송 → 잔류 속도 제거
+  STM32 motor.c는 이제 투명한 패스스루(Transparent Pass-Through).
+  전륜(htim1)은 양수=전진으로 정상 결선.
+  후륜(htim2)은 하드웨어 역결선 → Python이 부호 반전을 담당.
 
-[수정] Sudden Surge 방지 — QoS depth=1
-  - 구독 큐를 depth=1로 제한 → 항상 최신 명령만 처리
-  - 경로 계획 중 쌓인 stale 메시지 즉시 폐기
+  ROS 2 Twist 입력:
+    linear.x  > 0 → 전진
+    linear.x  < 0 → 후진
+    angular.z > 0 → 좌회전 (CCW)
+    angular.z < 0 → 우회전 (CW)
+    linear.y  = 무시 (스키드-스티어는 스트레이핑 불가)
 
-E-Stop (Buzzing 방지):
-  - /e_stop (Bool) True → CAN 즉시 정지 + 모든 cmd_vel 무시
-  - /e_stop_ack (Bool) 게시 → Nav2에 정지 상태 통보
+  4-휠 IK 계산:
+    v_left  = linear - angular   (angular>0 = 좌회전 = 좌측 후진)
+    v_right = linear + angular   (angular>0 = 좌회전 = 우측 전진)
+
+    FL = +v_left   × MAX_SPEED  (전륜-좌: 정상 결선)
+    FR = +v_right  × MAX_SPEED  (전륜-우: 정상 결선)
+    RL = -v_left   × MAX_SPEED  (후륜-좌: 역결선 보정 → 부호 반전)
+    RR = -v_right  × MAX_SPEED  (후륜-우: 역결선 보정 → 부호 반전)
+
+  검증:
+    전진 (linear=+1):  FL=+MAX, FR=+MAX, RL=-MAX, RR=-MAX ✓
+    좌회전 (angular=+1): FL=-MAX, FR=+MAX, RL=+MAX, RR=-MAX ✓
+    우회전 (angular=-1): FL=+MAX, FR=-MAX, RL=-MAX, RR=+MAX ✓
+
+[CAN 프로토콜]
+  8바이트 Big-Endian:  [FL(2)] [FR(2)] [RL(2)] [RR(2)]
+  STM32 수신 후 Motor_Drive(fl, fr, rl, rr) 호출
+
+[cmd_vel Mux]
+  /cmd_vel_keyboard → MANUAL 모드에서만 CAN 전송
+  /cmd_vel_nav2     → AUTO   모드에서만 CAN 전송
+    (launch remapping: /cmd_vel_nav2 ← /cmd_vel from Nav2)
+
+[E-Stop]
+  /e_stop (Bool) True → CAN 즉시 정지 + 모든 cmd_vel 무시
 """
 
 import struct
@@ -74,23 +95,13 @@ class MotorNode(Node):
             raise
 
         # ── 구독: /cmd_vel_keyboard (keyboard_node 출력) ─────────
-        # MANUAL 모드에서만 CAN으로 전달
         self._sub_keyboard = self.create_subscription(
-            Twist,
-            '/cmd_vel_keyboard',
-            self._keyboard_cb,
-            _CMD_VEL_QOS,
+            Twist, '/cmd_vel_keyboard', self._keyboard_cb, _CMD_VEL_QOS,
         )
 
-        # ── 구독: /cmd_vel_nav2 (Nav2 controller 출력) ───────────
-        # AUTO 모드에서만 CAN으로 전달
-        # launch 파일에서 remappings=[('/cmd_vel_nav2', '/cmd_vel')] 설정
-        # → Nav2가 /cmd_vel에 게시 → motor_node는 /cmd_vel_nav2로 수신
+        # ── 구독: /cmd_vel_nav2 (Nav2 출력, launch remapping) ─────
         self._sub_nav2 = self.create_subscription(
-            Twist,
-            '/cmd_vel_nav2',
-            self._nav2_cb,
-            _CMD_VEL_QOS,
+            Twist, '/cmd_vel_nav2', self._nav2_cb, _CMD_VEL_QOS,
         )
 
         # ── 구독: /mode, /e_stop ──────────────────────────────────
@@ -105,9 +116,11 @@ class MotorNode(Node):
         self._pub_estop_ack = self.create_publisher(Bool, '/e_stop_ack', 10)
 
         self.get_logger().info(
-            'MotorNode 준비 완료 (8바이트 CAN + E-Stop + cmd_vel Mux)\n'
-            '  /cmd_vel_keyboard → MANUAL 모드에서만 처리\n'
-            '  /cmd_vel_nav2     → AUTO   모드에서만 처리 (Nav2 /cmd_vel remapped)'
+            'MotorNode 준비 완료 (Skid-Steer IK + 후륜 역결선 보정)\n'
+            '  IK: v_left=linear-angular, v_right=linear+angular\n'
+            '  RL/RR 부호 반전 (하드웨어 역결선 보정)\n'
+            '  /cmd_vel_keyboard → MANUAL 모드\n'
+            '  /cmd_vel_nav2     → AUTO   모드'
         )
 
     # ──────────────────────────────────────────────────────────────
@@ -124,79 +137,93 @@ class MotorNode(Node):
             self._send_can(0, 0, 0, 0)
 
     # ──────────────────────────────────────────────────────────────
-    # ── /e_stop 콜백 — Buzzing 방지 ──────────────────────────────
+    # ── /e_stop 콜백 ──────────────────────────────────────────────
     # ──────────────────────────────────────────────────────────────
     def _estop_cb(self, msg: Bool) -> None:
         with self._estop_lock:
-            prev_state        = self._is_estopped
+            prev              = self._is_estopped
             self._is_estopped = msg.data
 
-        if msg.data and not prev_state:
+        if msg.data and not prev:
             self.get_logger().warn('[E-STOP] 발동! CAN 즉시 정지')
             self._send_can(0, 0, 0, 0)
-            ack = Bool()
-            ack.data = True
+            ack = Bool(); ack.data = True
             self._pub_estop_ack.publish(ack)
-
-        elif not msg.data and prev_state:
-            self.get_logger().info('[E-STOP] 해제. 정상 모드 복귀')
-            ack = Bool()
-            ack.data = False
+        elif not msg.data and prev:
+            self.get_logger().info('[E-STOP] 해제')
+            ack = Bool(); ack.data = False
             self._pub_estop_ack.publish(ack)
 
     # ──────────────────────────────────────────────────────────────
     # ── /cmd_vel_keyboard 콜백 (MANUAL 전용) ─────────────────────
     # ──────────────────────────────────────────────────────────────
     def _keyboard_cb(self, msg: Twist) -> None:
-        # Rule A: MANUAL 모드에서만 처리 — Auto 명령 완전 차단
         with self._mode_lock:
             if self._mode != 'MANUAL':
-                return
-
+                return   # AUTO 모드: 키보드 완전 차단
         with self._estop_lock:
             if self._is_estopped:
                 self._send_can(0, 0, 0, 0)
                 return
-
         self._apply_twist(msg)
 
     # ──────────────────────────────────────────────────────────────
     # ── /cmd_vel_nav2 콜백 (AUTO 전용) ───────────────────────────
     # ──────────────────────────────────────────────────────────────
     def _nav2_cb(self, msg: Twist) -> None:
-        # Rule B: AUTO 모드에서만 처리 — Manual 조작 중 Nav2 명령 완전 차단
         with self._mode_lock:
             if self._mode != 'AUTO':
-                return
-
+                return   # MANUAL 모드: Nav2 완전 차단
         with self._estop_lock:
             if self._is_estopped:
                 self._send_can(0, 0, 0, 0)
                 return
-
         self._apply_twist(msg)
 
     # ──────────────────────────────────────────────────────────────
-    # ── Twist → 4-휠 스키드-스티어 CAN 변환 ──────────────────────
+    # ── Skid-Steer IK → 4-휠 CAN 명령 변환 ──────────────────────
     # ──────────────────────────────────────────────────────────────
     def _apply_twist(self, msg: Twist) -> None:
+        """
+        ROS 2 Twist → 4-휠 스키드-스티어 CAN 속도값 변환.
+
+        입력:
+          msg.linear.x  : 전진/후진 속도 (-1.0 ~ +1.0 정규화)
+          msg.angular.z : 회전 속도   (-1.0 ~ +1.0 정규화)
+          msg.linear.y  : 무시 (스키드-스티어 불가)
+
+        스키드-스티어 IK:
+          v_left  = linear - angular
+          v_right = linear + angular
+
+        STM32 Motor_Drive CAN 값:
+          FL = +v_left  * MAX_SPEED  (전륜-좌: 정상 결선)
+          FR = +v_right * MAX_SPEED  (전륜-우: 정상 결선)
+          RL = -v_left  * MAX_SPEED  (후륜-좌: 역결선 → 부호 반전)
+          RR = -v_right * MAX_SPEED  (후륜-우: 역결선 → 부호 반전)
+        """
+        # 입력 클램프 [-1.0, +1.0]
         linear  = max(-1.0, min(1.0, float(msg.linear.x)))
         angular = max(-1.0, min(1.0, float(msg.angular.z)))
+        # linear.y 는 완전 무시 (스키드-스티어)
 
-        linear_v  = linear  * self._max_speed
-        angular_v = angular * self._max_speed
+        # ── 좌/우 측 속도 계산 (정규화) ──────────────────────────
+        v_left  = linear - angular   # angular > 0 (좌회전) → 좌측 속도 감소
+        v_right = linear + angular   # angular > 0 (좌회전) → 우측 속도 증가
 
-        # [수정됨] 스키드-스티어 역기구학의 정석
-        # 대원칙: 좌측은 좌측끼리, 우측은 우측끼리 완벽히 동일한 명령을 하달
-        left_speed = linear_v - angular_v
-        right_speed = -linear_v - angular_v  # 우측 모터 역결선(-) 반영
+        # 합산 후 클램프 (|v| > 1.0 가능)
+        v_left  = max(-1.0, min(1.0, v_left))
+        v_right = max(-1.0, min(1.0, v_right))
 
-        fl = int(left_speed)
-        rl = int(left_speed)
-        fr = int(right_speed)
-        rr = int(right_speed)
+        N = self._max_speed   # 9999
 
-        N  = self._max_speed
+        # ── 4-휠 CAN 속도값 계산 ─────────────────────────────────
+        fl = int( v_left  * N)   # 전륜-좌: 그대로 적용
+        fr = int( v_right * N)   # 전륜-우: 그대로 적용
+        rl = int(-v_left  * N)   # 후륜-좌: 역결선 보정 (부호 반전)
+        rr = int(-v_right * N)   # 후륜-우: 역결선 보정 (부호 반전)
+
+        # 최종 클램프 (정수 범위 보장)
         fl = max(-N, min(N, fl))
         fr = max(-N, min(N, fr))
         rl = max(-N, min(N, rl))
@@ -204,14 +231,18 @@ class MotorNode(Node):
 
         self._send_can(fl, fr, rl, rr)
         self.get_logger().debug(
-            f'[CAN TX] FL={fl:+6d} FR={fr:+6d} RL={rl:+6d} RR={rr:+6d}'
+            f'[IK] lin={linear:+.3f} ang={angular:+.3f} | '
+            f'FL={fl:+6d} FR={fr:+6d} RL={rl:+6d} RR={rr:+6d}'
         )
 
     # ──────────────────────────────────────────────────────────────
     # ── CAN 전송 ──────────────────────────────────────────────────
     # ──────────────────────────────────────────────────────────────
     def _send_can(self, fl: int, fr: int, rl: int, rr: int) -> None:
-        """8-바이트 Big-Endian CAN 프레임 전송."""
+        """8-바이트 Big-Endian CAN 프레임 전송.
+        형식: [FL(2B)][FR(2B)][RL(2B)][RR(2B)]
+        STM32 Motor_Drive(fl, fr, rl, rr) 호출됨.
+        """
         data = struct.pack('>hhhh', fl, fr, rl, rr)
         msg  = can.Message(
             arbitration_id=self._can_id,
@@ -226,7 +257,7 @@ class MotorNode(Node):
     # ── 노드 소멸 ─────────────────────────────────────────────────
     def destroy_node(self):
         try:
-            self._send_can(0, 0, 0, 0)
+            self._send_can(0, 0, 0, 0)   # 긴급 정지
             self._bus.shutdown()
         except Exception:
             pass
@@ -243,6 +274,3 @@ def main(args=None):
     finally:
         node.destroy_node()
         rclpy.shutdown()
-
-if __name__ == '__main__':
-    main()
