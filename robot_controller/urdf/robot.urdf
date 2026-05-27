@@ -1,30 +1,6 @@
 <?xml version="1.0"?>
-<!--
-  robot.urdf
-  ==========
-  Self-delivery Robot — URDF 모델
-  물리 측정 기반 정확한 치수 반영
-
-  TF 트리:
-    base_footprint (지면)
-      └─ base_link  (로봇 중심, 지면 기준 z=0)
-          ├─ wheel_front_left_link   (x=+0.25, y=+0.255, z=+0.04)
-          ├─ wheel_front_right_link  (x=+0.25, y=-0.255, z=+0.04)
-          ├─ wheel_rear_left_link    (x=-0.25, y=+0.255, z=+0.04)
-          ├─ wheel_rear_right_link   (x=-0.25, y=-0.255, z=+0.04)
-          ├─ lidar_link              (x=+0.160, y=0.0, z=+0.355, yaw=180°)
-          └─ imu_link                (x=+0.160, y=0.0, z=+0.325)
-
-  로봇 치수:
-    차체:  Length=0.50m, Width=0.40m, Height=0.54m
-    바퀴:  Radius=0.04m (지름 8cm), Width=0.05m
-    전체 폭(바퀴 외측): 0.56m (차체 각 측면에서 8cm 돌출)
--->
 <robot name="self_delivery_robot">
 
-  <!-- ============================================================ -->
-  <!-- 재질 정의                                                     -->
-  <!-- ============================================================ -->
   <material name="blue">
     <color rgba="0.2 0.4 0.8 1.0"/>
   </material>
@@ -38,59 +14,39 @@
     <color rgba="0.5 0.5 0.5 1.0"/>
   </material>
 
-  <!-- ============================================================ -->
-  <!-- base_footprint: 지면 기준점 (가상 링크, 시각화 없음)         -->
-  <!-- ============================================================ -->
   <link name="base_footprint"/>
 
-  <!-- base_footprint → base_link: 항등 변환 (같은 위치) -->
   <joint name="base_footprint_joint" type="fixed">
     <parent link="base_footprint"/>
     <child  link="base_link"/>
     <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
 
-  <!-- ============================================================ -->
-  <!-- base_link: 로봇 메인 프레임 (지면 z=0 기준)                 -->
-  <!--   차체 시각화: 바퀴 위에 올라타도록 z 오프셋 적용           -->
-  <!--   visual z = wheel_radius + chassis_height/2                 -->
-  <!--              = 0.04 + 0.27 = 0.31m                          -->
-  <!-- ============================================================ -->
   <link name="base_link">
     <visual>
-      <origin xyz="0.0 0.0 0.31" rpy="0 0 0"/>
+      <origin xyz="0.0 0.0 0.35" rpy="0 0 0"/>
       <geometry>
         <box size="0.50 0.40 0.54"/>
       </geometry>
       <material name="blue"/>
     </visual>
     <collision>
-      <origin xyz="0.0 0.0 0.31" rpy="0 0 0"/>
+      <origin xyz="0.0 0.0 0.35" rpy="0 0 0"/>
       <geometry>
         <box size="0.50 0.40 0.54"/>
       </geometry>
     </collision>
     <inertial>
-      <origin xyz="0.0 0.0 0.31" rpy="0 0 0"/>
+      <origin xyz="0.0 0.0 0.35" rpy="0 0 0"/>
       <mass value="12.0"/>
-      <!-- 직육면체 관성 모멘트: I = m/12 * (a² + b²) -->
       <inertia ixx="0.3492" ixy="0.0" ixz="0.0"
                iyy="0.3808" iyz="0.0"
                izz="0.1733"/>
     </inertial>
   </link>
 
-  <!-- ============================================================ -->
-  <!-- 앞바퀴 좌측 (Front-Left)                                     -->
-  <!--   위치: x=+0.25, y=+0.255, z=+0.04                         -->
-  <!--   y = body_half_width + wheel_half_length                    -->
-  <!--     = 0.20 + 0.025 = 0.225? No:                             -->
-  <!--   outer_edge = 0.28m (total width 0.56m / 2)                -->
-  <!--   wheel_center_y = 0.28 - 0.025 = 0.255m ✓                 -->
-  <!-- ============================================================ -->
   <link name="wheel_front_left_link">
     <visual>
-      <!-- 실린더 기본 축=Z, Y축 방향으로 눕히려면 roll=90° -->
       <origin xyz="0 0 0" rpy="1.5707963 0 0"/>
       <geometry>
         <cylinder radius="0.04" length="0.05"/>
@@ -117,9 +73,6 @@
     <origin xyz="0.25 0.255 0.04" rpy="0 0 0"/>
   </joint>
 
-  <!-- ============================================================ -->
-  <!-- 앞바퀴 우측 (Front-Right)                                    -->
-  <!-- ============================================================ -->
   <link name="wheel_front_right_link">
     <visual>
       <origin xyz="0 0 0" rpy="1.5707963 0 0"/>
@@ -148,9 +101,6 @@
     <origin xyz="0.25 -0.255 0.04" rpy="0 0 0"/>
   </joint>
 
-  <!-- ============================================================ -->
-  <!-- 뒷바퀴 좌측 (Rear-Left)                                      -->
-  <!-- ============================================================ -->
   <link name="wheel_rear_left_link">
     <visual>
       <origin xyz="0 0 0" rpy="1.5707963 0 0"/>
@@ -179,9 +129,6 @@
     <origin xyz="-0.25 0.255 0.04" rpy="0 0 0"/>
   </joint>
 
-  <!-- ============================================================ -->
-  <!-- 뒷바퀴 우측 (Rear-Right)                                     -->
-  <!-- ============================================================ -->
   <link name="wheel_rear_right_link">
     <visual>
       <origin xyz="0 0 0" rpy="1.5707963 0 0"/>
@@ -210,11 +157,6 @@
     <origin xyz="-0.25 -0.255 0.04" rpy="0 0 0"/>
   </joint>
 
-  <!-- ============================================================ -->
-  <!-- lidar_link: RPLIDAR A1                                       -->
-  <!--   위치: x=+0.160, y=0.0, z=+0.355 (base_link 기준)         -->
-  <!--   회전: yaw=180° (rpy="0 0 3.14159") — 센서 물리 방향 보정  -->
-  <!-- ============================================================ -->
   <link name="lidar_link">
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0"/>
@@ -240,19 +182,13 @@
   <joint name="lidar_joint" type="fixed">
     <parent link="base_link"/>
     <child  link="lidar_link"/>
-    <origin xyz="0.160 0.0 0.355" rpy="0 0 0"/>
+    <origin xyz="0.160 0.0 0.670" rpy="0 0 3.14159"/>
   </joint>
 
-  <!-- ============================================================ -->
-  <!-- imu_link: MPU6050                                            -->
-  <!--   위치: x=+0.160, y=0.0, z=+0.325 (lidar에서 3cm 아래)     -->
-  <!--   회전: 없음 (rpy="0 0 0")                                   -->
-  <!-- ============================================================ -->
   <link name="imu_link">
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0"/>
       <geometry>
-        <!-- MPU6050 칩 크기 근사 (30×30×5mm) -->
         <box size="0.03 0.03 0.005"/>
       </geometry>
       <material name="red"/>
@@ -274,7 +210,7 @@
   <joint name="imu_joint" type="fixed">
     <parent link="base_link"/>
     <child  link="imu_link"/>
-    <origin xyz="0.160 0.0 0.325" rpy="0 0 0"/>
+    <origin xyz="0.180 0.0 0.6225" rpy="0 0 0"/>
   </joint>
 
 </robot>

@@ -184,51 +184,19 @@ class MotorNode(Node):
     # ── Mecanum O-구성 IK → 4-휠 CAN 명령 변환 ───────────────────
     # ──────────────────────────────────────────────────────────────
     def _apply_twist(self, msg: Twist) -> None:
-        """
-        ROS 2 Twist → 메카넘 O-구성 IK → STM32 CAN 속도값 변환.
-
-        [하드웨어 분석 — 실험 데이터 기반]
-
-        Test 1: CAN[1,1,1,1] → 제자리 회전
-          → 이 로봇은 Mecanum O-구성 (O-config) 동작
-          → 표준 X-config에서 [1,1,1,1] = 전진이지만, 이 로봇은 회전 발생
-
-        Test 2: CAN[FL=+, RL=-, FR=-, RR=+] → 직진 전진
-          → 하드웨어 역결선 확인:
-               FL: 양수 = 전진 (정상 결선)
-               FR: 음수 = 전진 (역결선)
-               RL: 음수 = 전진 (역결선)
-               RR: 양수 = 전진 (정상 결선)
-
-        [최종 IK 공식 — O-구성 + 역결선 보정 + ROS2 부호 규칙]
-
-          fl_can = +(Vx - Wz) × N
-          fr_can = -(Vx + Wz) × N   ← FR 역결선: 부호 반전
-          rl_can = -(Vx - Wz) × N   ← RL 역결선: 부호 반전
-          rr_can = +(Vx + Wz) × N
-
-        [동작 검증]
-          W 전진  (Vx=+1): FL=+N, FR=-N, RL=-N, RR=+N → 4바퀴 전진 ✓
-          A 좌회전(Wz=+1): FL=-N, FR=-N, RL=+N, RR=+N → 좌측 후진, 우측 전진(CCW) ✓
-          D 우회전(Wz=-1): FL=+N, FR=+N, RL=-N, RR=-N → 좌측 전진, 우측 후진(CW) ✓
-          S 후진  (Vx=-1): FL=-N, FR=+N, RL=+N, RR=-N → 4바퀴 후진 ✓
-        """
-        # ── 입력 파싱 및 클램프 [-1.0, +1.0] ─────────────────────
         Vx = max(-1.0, min(1.0, float(msg.linear.x)))
-        Vy = 0.0   # 스트레이핑 강제 비활성화 (linear.y 완전 무시)
+        Vy = 0.0   # 스트레이핑 완전 차단
         Wz = max(-1.0, min(1.0, float(msg.angular.z)))
 
-        N = self._max_speed   # 9999
+        N = self._max_speed
 
-        # ── O-구성 IK + 하드웨어 역결선 보정 ─────────────────────
-        # FL/RR: 정상 결선 → 부호 그대로
-        # FR/RL: 역결선 → 부호 반전 (STM32 투명 패스스루이므로 Python 담당)
-        fl_can = int( (Vx - Wz) * N)   # 전륜-좌: 정상 결선
-        fr_can = int(-(Vx + Wz) * N)   # 전륜-우: 역결선 보정
-        rl_can = int(-(Vx - Wz) * N)   # 후륜-좌: 역결선 보정
-        rr_can = int( (Vx + Wz) * N)   # 후륜-우: 정상 결선
+        # ── O-구성 메카넘 + 하드웨어 역결선 완벽 보정 ──
+        # FL(정상), FR(역결선), RL(역결선), RR(정상)
+        fl_can = int(( Vx + Wz) * N)
+        fr_can = int((-Vx + Wz) * N)
+        rl_can = int((-Vx + Wz) * N)
+        rr_can = int(( Vx + Wz) * N)
 
-        # 최종 클램프 (정수 범위 보장)
         fl_can = max(-N, min(N, fl_can))
         fr_can = max(-N, min(N, fr_can))
         rl_can = max(-N, min(N, rl_can))
