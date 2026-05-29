@@ -185,17 +185,17 @@ class MotorNode(Node):
     # ──────────────────────────────────────────────────────────────
     def _apply_twist(self, msg: Twist) -> None:
         Vx = max(-1.0, min(1.0, float(msg.linear.x)))
-        Vy = 0.0   # 스트레이핑 완전 차단
+        Vy = 0.0   # 스트레이핑 완전 차단 (스키드-스티어 모드)
         Wz = max(-1.0, min(1.0, float(msg.angular.z)))
 
         N = self._max_speed
 
-        # ── O-구성 메카넘 + 하드웨어 역결선 완벽 보정 ──
-        # FL(정상), FR(역결선), RL(역결선), RR(정상)
-        fl_can = int(( Vx + Wz) * N)
-        fr_can = int((-Vx + Wz) * N)
-        rl_can = int((-Vx + Wz) * N)
-        rr_can = int(( Vx + Wz) * N)
+        # ── 완벽한 표준 기구학 (마이너스 꼼수 절대 금지) ──
+        # 방향 반전은 무조건 STM32(motor.h)에서만 처리합니다!
+        fl_can = int(( Vx - Wz) * N)  
+        fr_can = int(( Vx + Wz) * N)  
+        rl_can = int(( Vx - Wz) * N)  
+        rr_can = int(( Vx + Wz) * N)  
 
         fl_can = max(-N, min(N, fl_can))
         fr_can = max(-N, min(N, fr_can))

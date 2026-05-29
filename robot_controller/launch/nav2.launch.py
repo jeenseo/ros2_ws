@@ -148,7 +148,7 @@ def generate_launch_description():
             'laser_scan_topic':     '/scan',
             'odom_topic':           '/odom_rf2o',
             'publish_tf':           False,
-            'base_frame_id':        'base_footprint',
+            'base_frame_id':        'lidar_link',
             'odom_frame_id':        'odom',
             'init_pose_from_topic': '',
             'freq':                 5.0,
