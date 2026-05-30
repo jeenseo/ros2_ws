@@ -49,10 +49,13 @@ ekf_node:
     #                  ax,    ay,    az]
     # [x, y, z, roll, pitch, yaw, vx, vy, vz, vroll, vpitch, vyaw, ax, ay, az]
     # rf2o: X, Y, Yaw (위치) + Vx, Wz (속도) 사용. Vy=0 (스키드-스티어)
+    # [x, y, z, roll, pitch, yaw, vx, vy, vz, vroll, vpitch, vyaw, ax, ay, az]
+    # rf2o: X, Y 위치 + Yaw (보조: 장기 드리프트 보정 역할)
+    # rf2o의 covariance가 IMU보다 크므로 EKF가 자동으로 낮은 가중치 부여 → gentle correction
     odom0_config: [true,  true,  false,
-                   false, false, false, # [수정] Yaw 보고 권한 박탈!
-                   false, false, false,  # [수정] Vx 보고 권한 박탈!
-                   false, false, false,  # [수정] Wz 보고 권한 박탈!
+                   false, false, true,   # Yaw 활성화 (보조 드리프트 보정)
+                   false, false, false,
+                   false, false, false,
                    false, false, false]
 
     odom0_queue_size:     5
@@ -71,10 +74,13 @@ ekf_node:
     #                  vx,    vy,    vz,
     #                  vroll, vpitch,vyaw,
     #                  ax,    ay,    az]
+    # [x, y, z, roll, pitch, yaw, vx, vy, vz, vroll, vpitch, vyaw, ax, ay, az]
+    # IMU: Yaw(절대) + Wz(속도) — 고주파 회전 추적 1차 소스
+    # ORIENTATION_COV=1e-4, ANGULAR_VEL_COV=1e-5 (mpu6050_node.py)
     imu0_config: [false, false, false,
-                  false, false, false,  # [수정] Yaw 보고 권한 박탈!
+                  false, false, true,   # Yaw 활성화 (1차 회전 소스)
                   false, false, false,
-                  false, false, true,
+                  false, false, true,   # Wz 유지
                   false, false, false]
 
     imu0_nodelay:                         false

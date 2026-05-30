@@ -65,9 +65,14 @@ DEG_TO_RAD           = math.pi / 180.0
 ALPHA = 0.98
 
 # ── IMU 노이즈 공분산 (대각 원소) ────────────────────────────────
-# 실제 센서 노이즈에 맞게 조정 필요. MPU6050 데이터시트 기준 초기값.
-ORIENTATION_COV     = 1e-5
-ANGULAR_VEL_COV     = 1e-5
+# [수정] EKF 3-소스 융합 전략:
+#   ORIENTATION_COV  1e-5 → 1e-4: Yaw를 IMU 1차 소스로 유지하되,
+#     LiDAR(rf2o)의 Yaw 보조 보정이 가능하도록 약간 느슨하게 설정.
+#     값이 너무 작으면(1e-5) EKF가 IMU Yaw를 완전 신뢰하여 LiDAR가
+#     보정을 못 하므로, 좌편향 드리프트가 장기간 누적됨.
+#   ANGULAR_VEL_COV  1e-5: 유지 → Wz 회전속도는 IMU가 1차 소스
+ORIENTATION_COV     = 1e-4   # Yaw orientation: IMU 주, LiDAR 보조 허용
+ANGULAR_VEL_COV     = 1e-5   # Wz 각속도: IMU 고신뢰 유지
 LINEAR_ACCEL_COV    = 1e-3
 
 

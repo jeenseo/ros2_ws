@@ -125,21 +125,19 @@ controller_server:
       max_vel_x:                           0.22
       max_vel_y:                           0.0
       # [수정] 0.4 → 0.8: 더 빠른 회전 허용 → 경로 추종 능력 향상
-      max_vel_theta:                       0.2
-      min_speed_xy:                        0.1
+      # [수정] 서빙 로봇 스타일 회전/속도 최적화
+      max_vel_theta:                       0.4    # 0.2 → 0.4: 장애물 회피 시 빠른 방향 전환
+      min_speed_xy:                        0.07   # 0.1 → 0.07: 비례 데드밴드 수정 후 미속 허용
       max_speed_xy:                        0.22
-      min_speed_theta:                     0.15
-      # [수정] 0.15 → 0.5: 너무 낮은 가속 한계가 DWB를 회전 위주로 구동시켜 진동 유발
-      acc_lim_x:                           0.2
+      min_speed_theta:                     0.1
+      # 서빙 로봇: 부드러운 출발 (너무 강한 가속은 음식 출렁임 유발)
+      acc_lim_x:                           0.15   # 0.2 → 0.15: 부드러운 직선 가속
       acc_lim_y:                           0.0
-      # [수정] 0.2 → 0.8: 각가속도 한계도 증가 → DWB가 실제 물리를 정확히 시뮬레이션
-      acc_lim_theta:                       0.2
-      # [수정] -0.25 → -0.5
-      # [수정] -0.2 -> -0.4: 장애물을 발견했을 때 강력하게 급브레이크를 밟을 수 있게 허용
-      decel_lim_x:                         -0.4
+      acc_lim_theta:                       0.3    # 0.2 → 0.3: 회전 반응성 향상
+      # 장애물 접근 시 자연스러운 감속 (너무 강하면 급정지 느낌)
+      decel_lim_x:                         -0.25  # -0.4 → -0.25: 여유있는 감속
       decel_lim_y:                         0.0
-      # [수정] -0.2 → -0.8
-      decel_lim_theta:                     -0.2
+      decel_lim_theta:                     -0.3   # -0.2 → -0.3: 회전 정지 향상
       vx_samples:                          10
       vy_samples:                          0 # 꽃게 걸음 0 높이면 꽃게 걸음 가능
       vtheta_samples:                      10
@@ -153,16 +151,17 @@ controller_server:
       stateful:                            True
       critics: ["RotateToGoal", "Oscillation", "BaseObstacle", "GoalAlign",
                 "PathAlign", "PathDist", "GoalDist"]
-      BaseObstacle.scale:              70.0 # 
-      # [수정] 32.0 → 16.0: PathAlign과 GoalAlign 경쟁 완화 → 좌우 진동 감소
-      PathAlign.scale:                 32.0 
-      # [수정] 0.1 → 0.3: 당근 거리 30cm → 고주파 진동 억제
+      # [수정] 서빙 로봇 DWB 크리틱 최적화
+      # BaseObstacle: 70.0은 과도 (장애물 근처에서 경로 난기류 유발)
+      # → 표준 범위(0.02~5.0)로 정상화. 대신 inflation_radius로 안전거리 확보.
+      BaseObstacle.scale:              0.1    # 70.0 → 0.1: 정상화 (극단값 제거)
+      PathAlign.scale:                 32.0
       PathAlign.forward_point_distance: 0.8
-      # [수정] 24.0 → 16.0
-      GoalAlign.scale:                 5.0
-      # [수정] 0.1 → 0.3
+      # GoalAlign: 5.0 → 16.0: 목표 지점 정렬 강화 (상차 정확도 향상)
+      GoalAlign.scale:                 16.0   # 5.0 → 16.0
       GoalAlign.forward_point_distance: 0.8
-      PathDist.scale:                  10.0
+      # PathDist: 10.0 → 32.0: 경로 이탈 방지 강화
+      PathDist.scale:                  32.0   # 10.0 → 32.0
       GoalDist.scale:                  32.0
       # [수정] 32.0 → 24.0: 목표 근처 과도한 회전 감소
       RotateToGoal.scale:              24.0
@@ -333,10 +332,10 @@ behavior_server:
     transform_tolerance:    1.0
     use_sim_time:           false
     simulate_ahead_time:    2.0
-    # [수정] DWB max_vel_theta(0.8), acc_lim_theta(0.8)에 맞춰 동기화
-    max_rotational_vel:     0.2
+    # [수정] DWB max_vel_theta(0.4), acc_lim_theta(0.3)에 맞춰 동기화
+    max_rotational_vel:     0.4
     min_rotational_vel:     0.1
-    rotational_acc_lim:     0.2
+    rotational_acc_lim:     0.3
 
 # ─────────────────────────────────────────────────────────────────────────
 waypoint_follower:
@@ -358,10 +357,10 @@ velocity_smoother:
     scale_velocities:     False
     feedback:             "OPEN_LOOP"
     # [수정] DWB 파라미터와 완전 동기화 (velocity_smoother != controller_server 시 surge 발생)
-    max_velocity:         [0.22, 0.0, 0.2]
-    min_velocity:         [-0.22, 0.0, -0.2]
-    max_accel:            [0.2, 0.0, 0.2]
-    max_decel:            [-0.2, 0.0, -0.2]
+    max_velocity:         [0.22, 0.0, 0.4]
+    min_velocity:         [-0.22, 0.0, -0.4]
+    max_accel:            [0.15, 0.0, 0.3]
+    max_decel:            [-0.25, 0.0, -0.3]
     odom_topic:           "odom"
     odom_duration:        0.1
     deadband_velocity:    [0.0, 0.0, 0.0]
