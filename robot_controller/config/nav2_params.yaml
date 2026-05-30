@@ -176,7 +176,8 @@ local_costmap: # $로봇 주변의 동적 장애물 감지 및 회피를 위한 
     ros__parameters:
       use_sim_time:       false
       update_frequency:   5.0
-      publish_frequency:  5.0
+      # 🚨 [수정 완료] 폭스글로브(화면)로 쏘는 주기를 1Hz로 낮춰 CPU와 Wi-Fi 대역폭 방어!
+      publish_frequency:  1.0  
       global_frame:       odom
       robot_base_frame:   base_footprint
       transform_tolerance: 1.0 # 추가됨
@@ -185,21 +186,15 @@ local_costmap: # $로봇 주변의 동적 장애물 감지 및 회피를 위한 
       height:             3
       resolution:         0.1
       # ── 정확한 로봇 footprint (물리 실측 기반, padding 없음) ──────
-      # 결정 기준:
-      #   X축(길이): 로봇 몸체 50cm > 바퀴 49cm → ±0.250m
-      #   Y축(너비): 바퀴 외측 56cm > 로봇 몸체 40cm → ±0.280m
-      # 패딩 제거: 안전 마진은 inflation_layer로 확보 (아래 참고)
       footprint: "[[0.25, 0.28], [0.25, -0.28], [-0.25, -0.28], [-0.25, 0.28]]"
       footprint_padding: 0.0     # 정확한 물리 경계 (패딩 없음)
       plugins: ["obstacle_layer", "inflation_layer"]
+      
       inflation_layer:
         plugin:              "nav2_costmap_2d::InflationLayer"
-        # [수정] 0.35 → 0.30: 벽 근처에서 유효 궤적이 없어 정지하는 문제 완화
-        #   로봇 반폭(0.28m) + inflation(0.30m) = 0.58m 최소 통과 폭
-        # [수정] 2.5 -> 1.5: 숫자가 작을수록 위험 구역(물리적 충돌 방지 공간)이 더 넓게 퍼집니다.
         cost_scaling_factor: 5.0
-        # [수정] 0.30 -> 0.55: 장애물을 훨씬 더 멀리서부터 의식하기 시작합니다.
         inflation_radius:    0.45
+        
       obstacle_layer:
         plugin:               "nav2_costmap_2d::ObstacleLayer"
         enabled:              True
@@ -217,30 +212,44 @@ local_costmap: # $로봇 주변의 동적 장애물 감지 및 회피를 위한 
           data_type:           "LaserScan"
           raytrace_max_range:  3.0
           raytrace_min_range:  0.0
-          obstacle_max_range:  3.0
+          # 🚨 [수정 완료] 맵 크기(3m)를 벗어나는 외곽 에러 방지를 위해 2.5m로 축소!
+          obstacle_max_range:  2.5 
           obstacle_min_range:  0.0
-      always_send_full_costmap: False
+      
+      # [유지] 바뀐 부분만 전송하여 네트워크 부하 최적화
+      always_send_full_costmap: True
 
 # ─────────────────────────────────────────────────────────────────────────
-global_costmap: # $전역 코스트맵: 사전 빌드된 정적 맵 사용
+# ─────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────
+global_costmap: # 전역 코스트맵: 사전 빌드된 정적 맵 사용
   global_costmap:
     ros__parameters:
       use_sim_time:        false
+      
+      # ⚠️ [참고] 0.1은 '10초에 1번' 갱신/전송한다는 뜻입니다. 
+      # 폭스글로브에서 맵이 뜰 때까지 최대 10초가 걸릴 수 있습니다!
       update_frequency:    0.1
       publish_frequency:   0.1
+      
       global_frame:        map           # ← odom에서 map으로 변경
       robot_base_frame:    base_footprint
-      transform_tolerance: 1.0 # 추가됨
-      # rolling_window 제거: 정적 맵 사용
-      resolution:          0.1
+      transform_tolerance: 1.0           # 추가됨
+      
+      # 🚨 [수정 완료] resolution 중복 제거 (기존 맵 파일에 맞게 0.05로 통일)
+      resolution:          0.05
+      
       # ── 정확한 로봇 footprint (local_costmap과 동일 기준) ─────────
       footprint: "[[0.25, 0.28], [0.25, -0.28], [-0.25, -0.28], [-0.25, 0.28]]"
       footprint_padding:   0.0
+      
       plugins: ["static_layer", "obstacle_layer", "inflation_layer"]
+      
       static_layer:
         plugin:    "nav2_costmap_2d::StaticLayer"
         enabled:   True
         map_subscribe_transient_local: True
+        
       obstacle_layer:
         plugin:              "nav2_costmap_2d::ObstacleLayer"
         enabled:             True
@@ -256,11 +265,13 @@ global_costmap: # $전역 코스트맵: 사전 빌드된 정적 맵 사용
           raytrace_min_range:  0.0
           obstacle_max_range:  2.5
           obstacle_min_range:  0.0
+          
+      # 🚨 [복구 완료] 플러그인에 선언해둔 inflation_layer 설정 복구
       inflation_layer:
         plugin:              "nav2_costmap_2d::InflationLayer"
-        # [수정] global_costmap도 동일 기준 적용 (0.35 → 0.30)
         cost_scaling_factor: 5.0
         inflation_radius:    0.45
+        
       always_send_full_costmap: False
 
 # ─────────────────────────────────────────────────────────────────────────

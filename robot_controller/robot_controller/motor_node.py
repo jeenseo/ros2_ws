@@ -26,7 +26,7 @@ ROS 2 Node: Mecanum Wheel IK + Encoder Odometry
 
 [cmd_vel Mux]
   /cmd_vel_keyboard → MANUAL 모드 전용
-  /cmd_vel_nav2     → AUTO   모드 전용
+  /cmd_vel_nav2    → AUTO   모드 전용
 
 [E-Stop]
   /e_stop True → CAN 즉시 정지
@@ -103,19 +103,9 @@ class MotorNode(Node):
         self._vel_yaw        = 0.0
         self._last_fb_time: float | None = None
 
-        # ── CAN 버스 초기화 ───────────────────────────────────────
-        try:
-            self._bus = can.interface.Bus(channel=channel, bustype='socketcan')
-            self.get_logger().info(
-                f'CAN 버스 초기화 완료 ({channel})'
-                f' | TX=0x{self._can_id:03X} | RX=0x{_CAN_RX_FB_ID:03X}'
-            )
-        except Exception as exc:
-            self.get_logger().fatal(f'CAN 버스 초기화 실패: {exc}')
-            raise
-
-        # ── CAN RX Notifier ───────────────────────────────────────
-        self._notifier = can.Notifier(self._bus, [self._can_rx_callback])
+        # ── ROS 게시자 (CAN 콜백에서 즉시 사용하므로 최상단으로 이동) ──
+        self._pub_estop_ack = self.create_publisher(Bool, '/e_stop_ack', 10)
+        self._pub_odom      = self.create_publisher(Odometry, odom_topic, 10)
 
         # ── ROS 구독 ──────────────────────────────────────────────
         self._sub_keyboard = self.create_subscription(
@@ -131,16 +121,26 @@ class MotorNode(Node):
             Bool, '/e_stop', self._estop_cb, 10,
         )
 
-        # ── ROS 게시자 ────────────────────────────────────────────
-        self._pub_estop_ack = self.create_publisher(Bool, '/e_stop_ack', 10)
-        self._pub_odom      = self.create_publisher(Odometry, odom_topic, 10)
-
         self.get_logger().info(
             'MotorNode 준비 완료\n'
             f'  TX: CAN 0x{self._can_id:03X} | IK: Mecanum Vy=0\n'
             f'  RX: CAN 0x{_CAN_RX_FB_ID:03X} → {odom_topic}\n'
             f'  TF 발행: 없음 (EKF 전담)'
         )
+
+        # ── CAN 버스 초기화 ───────────────────────────────────────
+        try:
+            self._bus = can.interface.Bus(channel=channel, bustype='socketcan')
+            self.get_logger().info(
+                f'CAN 버스 초기화 완료 ({channel})'
+                f' | TX=0x{self._can_id:03X} | RX=0x{_CAN_RX_FB_ID:03X}'
+            )
+        except Exception as exc:
+            self.get_logger().fatal(f'CAN 버스 초기화 실패: {exc}')
+            raise
+
+        # ── CAN RX Notifier (스레드 실행을 가장 마지막에 배치) ───────
+        self._notifier = can.Notifier(self._bus, [self._can_rx_callback])
 
     # ══════════════════════════════════════════════════════════════
     # CAN RX: STM32 엔코더 피드백
