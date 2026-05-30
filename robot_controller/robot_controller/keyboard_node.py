@@ -39,8 +39,8 @@ from std_msgs.msg import String
 
 
 # ── 속도 레벨 ─────────────────────────────────────────────────────
-SPEED_NORMAL = 2000 / 9999   # ≈ 0.2002
-SPEED_BOOST  = 4000 / 9999   # ≈ 0.4001
+SPEED_NORMAL = 100 / 9999   # ≈ 0.2002
+SPEED_BOOST  = 2000 / 9999   # ≈ 0.4001
 
 
 class KeyboardNode(Node):
