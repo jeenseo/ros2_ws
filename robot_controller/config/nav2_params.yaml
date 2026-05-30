@@ -176,14 +176,14 @@ local_costmap: # $로봇 주변의 동적 장애물 감지 및 회피를 위한 
     ros__parameters:
       use_sim_time:       false
       update_frequency:   5.0
-      publish_frequency:  2.0
+      publish_frequency:  5.0
       global_frame:       odom
       robot_base_frame:   base_footprint
       transform_tolerance: 1.0 # 추가됨
       rolling_window:     true
       width:              3
       height:             3
-      resolution:         0.05
+      resolution:         0.1
       # ── 정확한 로봇 footprint (물리 실측 기반, padding 없음) ──────
       # 결정 기준:
       #   X축(길이): 로봇 몸체 50cm > 바퀴 49cm → ±0.250m
@@ -215,7 +215,7 @@ local_costmap: # $로봇 주변의 동적 장애물 감지 및 회피를 위한 
           clearing:            True
           marking:             True
           data_type:           "LaserScan"
-          raytrace_max_range:  12.0
+          raytrace_max_range:  3.0
           raytrace_min_range:  0.0
           obstacle_max_range:  3.0
           obstacle_min_range:  0.0
@@ -232,7 +232,7 @@ global_costmap: # $전역 코스트맵: 사전 빌드된 정적 맵 사용
       robot_base_frame:    base_footprint
       transform_tolerance: 1.0 # 추가됨
       # rolling_window 제거: 정적 맵 사용
-      resolution:          0.05
+      resolution:          0.1
       # ── 정확한 로봇 footprint (local_costmap과 동일 기준) ─────────
       footprint: "[[0.25, 0.28], [0.25, -0.28], [-0.25, -0.28], [-0.25, 0.28]]"
       footprint_padding:   0.0

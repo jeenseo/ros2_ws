@@ -50,9 +50,9 @@ ekf_node:
     # [x, y, z, roll, pitch, yaw, vx, vy, vz, vroll, vpitch, vyaw, ax, ay, az]
     # rf2o: X, Y, Yaw (위치) + Vx, Wz (속도) 사용. Vy=0 (스키드-스티어)
     odom0_config: [true,  true,  false,
-                   false, false, true,
-                   true,  false, false,
-                   false, false, true,
+                   false, false, true, # [수정] Yaw 보고 권한 박탈!
+                   false, false, false,  # [수정] Vx 보고 권한 박탈!
+                   false, false, false,  # [수정] Wz 보고 권한 박탈!
                    false, false, false]
 
     odom0_queue_size:     5
@@ -72,7 +72,7 @@ ekf_node:
     #                  vroll, vpitch,vyaw,
     #                  ax,    ay,    az]
     imu0_config: [false, false, false,
-                  false, false, true,
+                  false, false, false,
                   false, false, false,
                   false, false, true,
                   false, false, false]
@@ -89,10 +89,11 @@ ekf_node:
     # ─────────────────────────────────────────────────────────────
     odom1: /odom_motor
 
-    # [x, y, z, roll, pitch, yaw, vx, vy, vz, vroll, vpitch, vyaw, ax, ay, az]
-    # 엔코더: X, Y, Yaw (위치) + Vx, Wz (속도) 사용. Vy=0 (스키드-스티어)
-    odom1_config: [true,  true,  false,
-                   false, false, true,
+# [x, y, z, roll, pitch, yaw, vx, vy, vz, vroll, vpitch, vyaw, ax, ay, az]
+    # [수정] 바퀴의 절대 위치(X, Y, Yaw)는 라이다와 충돌하므로 모조리 false로 끕니다!
+    # 오직 치고 나가는 전진 속도(Vx)와 회전 속도(Vyaw)만 true로 살려둡니다.
+    odom1_config: [false, false, false,
+                   false, false, false,
                    true,  false, false,
                    false, false, true,
                    false, false, false]
