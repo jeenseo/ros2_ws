@@ -270,20 +270,20 @@ class MotorNode(Node):
         self._pub_odom.publish(odom)
 
         # ── TransformStamped (odom → base_link) ──────────────────
-        tf_msg = TransformStamped()
-        tf_msg.header.stamp     = stamp
-        tf_msg.header.frame_id  = self._odom_frame
-        tf_msg.child_frame_id   = self._base_frame
+        # tf_msg = TransformStamped()
+        # tf_msg.header.stamp     = stamp
+        # tf_msg.header.frame_id  = self._odom_frame
+        # tf_msg.child_frame_id   = self._base_frame
 
-        tf_msg.transform.translation.x = x
-        tf_msg.transform.translation.y = y
-        tf_msg.transform.translation.z = 0.0
-        tf_msg.transform.rotation.x    = qx
-        tf_msg.transform.rotation.y    = qy
-        tf_msg.transform.rotation.z    = qz
-        tf_msg.transform.rotation.w    = qw
+        # tf_msg.transform.translation.x = x
+        # tf_msg.transform.translation.y = y
+        # tf_msg.transform.translation.z = 0.0
+        # tf_msg.transform.rotation.x    = qx
+        # tf_msg.transform.rotation.y    = qy
+        # tf_msg.transform.rotation.z    = qz
+        # tf_msg.transform.rotation.w    = qw
 
-        self._tf_broadcaster.sendTransform(tf_msg)
+        # self._tf_broadcaster.sendTransform(tf_msg)
 
     # ══════════════════════════════════════════════════════════════
     # cmd_vel 처리 (TX: 모터 명령)
