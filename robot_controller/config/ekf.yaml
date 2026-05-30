@@ -1,112 +1,66 @@
 # ekf.yaml
 # ========
 # robot_localization EKF 노드 설정
-# 3-소스 융합: 엔코더 오도메트리 + LiDAR 오도메트리 + IMU
-#
-# 상태 벡터 (15원소):
-#   [x, y, z, roll, pitch, yaw, vx, vy, vz, vroll, vpitch, vyaw, ax, ay, az]
-#
-# 소스 구성:
-#   odom0 (/odom_rf2o)  : LiDAR 스캔 매칭 (X, Y, Yaw, Vx, Wz)
-#   imu0  (/imu/data)   : MPU6050 IMU (Yaw, Wz)
-#   odom1 (/odom_motor) : 엔코더 휠 오도메트리 (X, Y, Yaw, Vx, Wz) ← 활성화됨
-#
-# TF 발행 규칙:
-#   ekf_node만 odom → base_footprint TF 발행 (publish_tf: true)
-#   motor_node, rf2o: TF 발행 금지
+# 2-소스 초경량 융합: 엔코더 오도메트리(Vx, Wz) + IMU(Wz)
+# (절대 위치와 절대 방향은 EKF가 자체 적분하여 계산하고, 최종 보정은 AMCL이 담당)
 
 ekf_node:
   ros__parameters:
 
     # ── 기본 설정 ─────────────────────────────────────────────────
     frequency:             30.0    # EKF 갱신 주파수 (Hz)
-    sensor_timeout:        0.1     # 센서 데이터 타임아웃 (초)
+    sensor_timeout:        0.1
     two_d_mode:            true    # 2D 주행 (z, roll, pitch 무시)
     transform_time_offset: 0.0
     transform_timeout:     0.0
     print_diagnostics:     true
     debug:                 false
-    # [중요] EKF만이 odom → base_footprint TF를 발행
-    # 다른 노드(motor_node, rf2o)는 TF 발행 금지
-    publish_tf:            true
+    publish_tf:            true    # EKF만이 odom → base_footprint TF 발행
 
     # ── 프레임 설정 ───────────────────────────────────────────────
     map_frame:       map
     odom_frame:      odom
-    base_link_frame: base_footprint   # Nav2 로봇 기준 프레임
-    world_frame:     odom             # EKF 기준 월드 프레임
+    base_link_frame: base_footprint
+    world_frame:     odom          # EKF 기준 월드 프레임
 
     # ─────────────────────────────────────────────────────────────
-    # odom0: LiDAR 오도메트리 (/odom_rf2o)
-    # rf2o_laser_odometry 출력 (publish_tf=False 설정됨)
+    # odom0: 엔코더 휠 오도메트리 (/odom_motor)
     # ─────────────────────────────────────────────────────────────
-    odom0: /odom_rf2o
+    odom0: /odom_motor
 
-    # 상태 벡터 매핑: [x,    y,     z,
-    #                  roll,  pitch, yaw,
-    #                  vx,    vy,    vz,
-    #                  vroll, vpitch,vyaw,
-    #                  ax,    ay,    az]
     # [x, y, z, roll, pitch, yaw, vx, vy, vz, vroll, vpitch, vyaw, ax, ay, az]
-    # rf2o: X, Y, Yaw (위치) + Vx, Wz (속도) 사용. Vy=0 (스키드-스티어)
-    odom0_config: [true,  true,  false,
-                   false, false, true, # [수정] Yaw 보고 권한 박탈!
-                   false, false, false,  # [수정] Vx 보고 권한 박탈!
-                   false, false, false,  # [수정] Wz 보고 권한 박탈!
+    # 오직 전진 속도(Vx)와 회전 속도(Vyaw/Wz)만 입력으로 사용
+    odom0_config: [false, false, false,
+                   false, false, false,
+                   true,  false, false,
+                   false, false, true,
                    false, false, false]
 
     odom0_queue_size:     5
     odom0_nodelay:        false
-    odom0_differential:   false   # 절대 위치 사용 (false = 절대값)
+    odom0_differential:   false
     odom0_relative:       false
 
     # ─────────────────────────────────────────────────────────────
     # imu0: MPU6050 IMU (/imu/data)
-    # Yaw 및 Yaw 각속도만 사용 (자기계 없으므로 절대 Yaw 신뢰도 낮음)
     # ─────────────────────────────────────────────────────────────
     imu0: /imu/data
 
-    # 상태 벡터 매핑: [x,    y,     z,
-    #                  roll,  pitch, yaw,
-    #                  vx,    vy,    vz,
-    #                  vroll, vpitch,vyaw,
-    #                  ax,    ay,    az]
+    # 오직 회전 속도(Vyaw/Wz)만 입력으로 사용하여 방향 드리프트 원천 차단
     imu0_config: [false, false, false,
                   false, false, false,
                   false, false, false,
                   false, false, true,
                   false, false, false]
 
-    imu0_nodelay:                         false
-    imu0_differential:                    false
-    imu0_relative:                        true    # 상대 Yaw 사용 (절대 기준 없음)
-    imu0_queue_size:                      5
-    imu0_remove_gravitational_acceleration: true  # 중력 가속도 제거
-
-    # ─────────────────────────────────────────────────────────────
-    # odom1: 엔코더 휠 오도메트리 (/odom_motor) ← 활성화됨
-    # motor_node.py 출력 (TF 발행 없음, EKF가 TF 담당)
-    # ─────────────────────────────────────────────────────────────
-    odom1: /odom_motor
-
-# [x, y, z, roll, pitch, yaw, vx, vy, vz, vroll, vpitch, vyaw, ax, ay, az]
-    # [수정] 바퀴의 절대 위치(X, Y, Yaw)는 라이다와 충돌하므로 모조리 false로 끕니다!
-    # 오직 치고 나가는 전진 속도(Vx)와 회전 속도(Vyaw)만 true로 살려둡니다.
-    odom1_config: [false, false, false,
-                   false, false, false,
-                   true,  false, false,
-                   false, false, true,
-                   false, false, false]
-
-    odom1_queue_size:     5
-    odom1_nodelay:        false
-    odom1_differential:   false   # 절대 위치 사용
-    odom1_relative:       false
+    imu0_nodelay:                           false
+    imu0_differential:                      false
+    imu0_relative:                          true
+    imu0_queue_size:                        5
+    imu0_remove_gravitational_acceleration: true
 
     # ─────────────────────────────────────────────────────────────
     # 프로세스 노이즈 공분산 Q (15×15 대각 행렬)
-    # 순서: x, y, z, roll, pitch, yaw, vx, vy, vz,
-    #        vroll, vpitch, vyaw, ax, ay, az
     # ─────────────────────────────────────────────────────────────
     process_noise_covariance: [
       0.05,   0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,
