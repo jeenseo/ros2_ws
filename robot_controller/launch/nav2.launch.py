@@ -128,9 +128,11 @@ def generate_launch_description():
             'can_channel': 'can0',
             'can_id':      0x123,
             'max_speed':   9999,
+            'odom_frame':  'odom',
+            'base_frame':  'base_footprint',
+            'odom_topic':  '/odom_motor',   # EKF odom1 소스 (충돌 방지)
         }],
         # Nav2의 /cmd_vel 출력을 /cmd_vel_nav2로 수신
-        # → motor_node 내부 mux가 AUTO 모드에서만 CAN 전달
         remappings=[('/cmd_vel_nav2', '/cmd_vel')],
     )
 

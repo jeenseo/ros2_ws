@@ -3,6 +3,10 @@ motor_node.py
 =============
 ROS 2 Node: Mecanum Wheel IK + Encoder Odometry
 
+[아키텍처 규칙]
+  이 노드는 절대 TF를 발행하지 않습니다.
+  odom → base_footprint TF는 ekf_node (robot_localization) 전담.
+
 [CAN TX: 0x123] Pi → STM32
   8바이트 Big-Endian: [FL(2B)][FR(2B)][RL(2B)][RR(2B)]
   단위: -9999 ~ +9999 (정규화 속도)
@@ -10,17 +14,15 @@ ROS 2 Node: Mecanum Wheel IK + Encoder Odometry
 [CAN RX: 0x124] STM32 → Pi
   4바이트 Big-Endian: [Left_delta(2B)][Right_delta(2B)]
   단위: 엔코더 누산 틱 (STM32가 전송 후 0으로 리셋)
-  하드웨어 주의: 우측 모터 역방향 장착 → Python에서 ×(-1) 보정
+  하드웨어 주의: 우측 모터 역방향 장착 → right_ticks × (-1) 적용
 
-[오도메트리 모델: 차동 구동]
-  바퀴 직경: 0.12 m → 둘레 = π × 0.12 m
-  트랙 폭: 0.51 m (바퀴 중심 간 거리)
-  엔코더 CPR: 1404 (13 PPR × 27 기어비 × 4 체배)
-  Vy = 0 (스트레이핑 없음)
+[오도메트리 출력]
+  /odom_motor (nav_msgs/Odometry)
+  — EKF의 odom1 소스로 사용
+  — TF 발행 없음
 
-[발행 토픽]
-  /odom (nav_msgs/Odometry)   — 위치 + 속도 + 공분산
-  TF: odom → base_link         — tf2 브로드캐스트
+[오도메트리 모델: 차동 구동 (Vy=0)]
+  바퀴 직경: 0.12 m, 트랙 폭: 0.51 m, CPR: 1404
 
 [cmd_vel Mux]
   /cmd_vel_keyboard → MANUAL 모드 전용
@@ -39,12 +41,11 @@ import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy, HistoryPolicy
 
-from geometry_msgs.msg import TransformStamped, Twist
+from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
 from std_msgs.msg import Bool, String
 
 import can
-import tf2_ros
 
 
 # ── cmd_vel QoS: depth=1 ────────────────────────────────────────
@@ -56,15 +57,15 @@ _CMD_VEL_QOS = QoSProfile(
 )
 
 # ── 오도메트리 물리 상수 ─────────────────────────────────────────
-_WHEEL_DIAMETER_M   = 0.12                           # 바퀴 직경 (m)
-_WHEEL_CIRCUM_M     = math.pi * _WHEEL_DIAMETER_M    # 바퀴 둘레 (m)
-_ENCODER_CPR        = 1404                           # 엔코더 해상도 (CPR)
-_TRACK_WIDTH_M      = 0.51                           # 트랙 폭: 바퀴 중심 간 거리 (m)
-_METER_PER_TICK     = _WHEEL_CIRCUM_M / _ENCODER_CPR # m/tick ≈ 0.0002685 m
+_WHEEL_DIAMETER_M = 0.12
+_WHEEL_CIRCUM_M   = math.pi * _WHEEL_DIAMETER_M   # ≈ 0.3770 m
+_ENCODER_CPR      = 1404                           # 13 PPR × 27 기어 × 4 체배
+_TRACK_WIDTH_M    = 0.51                           # 바퀴 중심 간 거리 (m)
+_METER_PER_TICK   = _WHEEL_CIRCUM_M / _ENCODER_CPR # ≈ 0.0002685 m/tick
 
 # ── CAN ID ──────────────────────────────────────────────────────
-_CAN_TX_ID          = 0x123   # Pi → STM32 모터 명령
-_CAN_RX_FB_ID       = 0x124   # STM32 → Pi 엔코더 피드백
+_CAN_TX_ID    = 0x123   # Pi → STM32 모터 명령
+_CAN_RX_FB_ID = 0x124   # STM32 → Pi 엔코더 피드백
 
 
 class MotorNode(Node):
@@ -77,13 +78,15 @@ class MotorNode(Node):
         self.declare_parameter('can_id',      _CAN_TX_ID)
         self.declare_parameter('max_speed',   9999)
         self.declare_parameter('odom_frame',  'odom')
-        self.declare_parameter('base_frame',  'base_link')
+        self.declare_parameter('base_frame',  'base_footprint')  # EKF child_frame
+        self.declare_parameter('odom_topic',  '/odom_motor')     # EKF odom1 소스
 
         channel          = self.get_parameter('can_channel').value
         self._can_id     = self.get_parameter('can_id').value
         self._max_speed  = self.get_parameter('max_speed').value
         self._odom_frame = self.get_parameter('odom_frame').value
         self._base_frame = self.get_parameter('base_frame').value
+        odom_topic       = self.get_parameter('odom_topic').value
 
         # ── 모드 & E-Stop 상태 ────────────────────────────────────
         self._mode        = 'MANUAL'
@@ -91,14 +94,14 @@ class MotorNode(Node):
         self._is_estopped = False
         self._estop_lock  = threading.Lock()
 
-        # ── 오도메트리 상태 (CAN RX 콜백 스레드와 공유) ───────────
-        self._odom_lock  = threading.Lock()
-        self._pose_x     = 0.0    # 누산 x 위치 (m)
-        self._pose_y     = 0.0    # 누산 y 위치 (m)
-        self._pose_yaw   = 0.0    # 누산 yaw 자세 (rad)
-        self._vel_x      = 0.0    # 선속도 (m/s)
-        self._vel_yaw    = 0.0    # 각속도 (rad/s)
-        self._last_fb_time: float | None = None  # 마지막 피드백 수신 시각 (monotonic)
+        # ── 오도메트리 상태 (CAN RX Notifier 콜백과 공유) ─────────
+        self._odom_lock      = threading.Lock()
+        self._pose_x         = 0.0
+        self._pose_y         = 0.0
+        self._pose_yaw       = 0.0
+        self._vel_x          = 0.0
+        self._vel_yaw        = 0.0
+        self._last_fb_time: float | None = None
 
         # ── CAN 버스 초기화 ───────────────────────────────────────
         try:
@@ -111,8 +114,7 @@ class MotorNode(Node):
             self.get_logger().fatal(f'CAN 버스 초기화 실패: {exc}')
             raise
 
-        # ── CAN RX Notifier (백그라운드 스레드에서 콜백 호출) ─────
-        # can.Notifier는 별도 스레드를 생성하여 수신 메시지를 처리
+        # ── CAN RX Notifier ───────────────────────────────────────
         self._notifier = can.Notifier(self._bus, [self._can_rx_callback])
 
         # ── ROS 구독 ──────────────────────────────────────────────
@@ -131,80 +133,65 @@ class MotorNode(Node):
 
         # ── ROS 게시자 ────────────────────────────────────────────
         self._pub_estop_ack = self.create_publisher(Bool, '/e_stop_ack', 10)
-        self._pub_odom      = self.create_publisher(Odometry, '/odom', 10)
-
-        # ── TF 브로드캐스터 ───────────────────────────────────────
-        self._tf_broadcaster = tf2_ros.TransformBroadcaster(self)
+        self._pub_odom      = self.create_publisher(Odometry, odom_topic, 10)
 
         self.get_logger().info(
             'MotorNode 준비 완료\n'
-            f'  TX: CAN 0x{self._can_id:03X} | IK: Mecanum Vy=0 강제\n'
-            f'  RX: CAN 0x{_CAN_RX_FB_ID:03X} | /odom + TF({self._odom_frame}→{self._base_frame})'
+            f'  TX: CAN 0x{self._can_id:03X} | IK: Mecanum Vy=0\n'
+            f'  RX: CAN 0x{_CAN_RX_FB_ID:03X} → {odom_topic}\n'
+            f'  TF 발행: 없음 (EKF 전담)'
         )
 
     # ══════════════════════════════════════════════════════════════
-    # CAN RX: STM32 엔코더 피드백 처리
+    # CAN RX: STM32 엔코더 피드백
     # ══════════════════════════════════════════════════════════════
 
     def _can_rx_callback(self, msg: can.Message) -> None:
         """
-        CAN Notifier 콜백 — 백그라운드 스레드에서 호출됨.
-        ID 0x124 메시지만 처리.
+        CAN Notifier 콜백 (백그라운드 스레드).
+        ID 0x124만 처리.
 
-        Payload (4바이트, Big-Endian):
+        Payload 4바이트 Big-Endian:
           Byte 0-1: int16 left_delta_ticks
-          Byte 2-3: int16 right_delta_ticks  ← 하드웨어 역방향 → ×(-1) 적용
+          Byte 2-3: int16 right_delta_ticks (× -1 역방향 보정)
         """
         if msg.arbitration_id != _CAN_RX_FB_ID:
-            return  # 다른 ID는 무시
+            return
 
         if len(msg.data) < 4:
             self.get_logger().warn(f'[RX 0x124] 페이로드 부족: {len(msg.data)}B')
             return
 
-        # ── 디코딩 ────────────────────────────────────────────────
         left_ticks, right_ticks = struct.unpack('>hh', msg.data[:4])
-        right_ticks = -right_ticks   # 우측 모터 역방향 보정 (물리 장착)
+        right_ticks = -right_ticks   # 우측 모터 역방향 보정
 
         # ── dt 계산 ───────────────────────────────────────────────
         now = time.monotonic()
         with self._odom_lock:
             if self._last_fb_time is None:
-                # 첫 수신: 상태만 초기화
                 self._last_fb_time = now
                 return
-
             dt = now - self._last_fb_time
             self._last_fb_time = now
 
         if dt <= 0.0 or dt > 1.0:
-            # dt가 비정상이면 건너뜀 (노드 재시작 직후 등)
             return
 
-        # ── 틱 → 거리 변환 (m) ───────────────────────────────────
+        # ── 틱 → 거리 (m) ────────────────────────────────────────
         dist_left  = left_ticks  * _METER_PER_TICK
         dist_right = right_ticks * _METER_PER_TICK
 
-        # ── 차동 구동 오도메트리 계산 ─────────────────────────────
-        #
-        #   delta_center = (dist_L + dist_R) / 2       [직선 이동량]
-        #   delta_yaw    = (dist_R - dist_L) / TRACK   [회전량]
-        #
-        #   중간 yaw를 사용한 위치 갱신 (2차 정확도):
-        #     x += delta_center × cos(yaw + delta_yaw/2)
-        #     y += delta_center × sin(yaw + delta_yaw/2)
-        #     yaw += delta_yaw
-        #
+        # ── 차동 구동 오도메트리 (2차 정확도) ────────────────────
         delta_center = (dist_left + dist_right) * 0.5
         delta_yaw    = (dist_right - dist_left) / _TRACK_WIDTH_M
 
         with self._odom_lock:
-            mid_yaw          = self._pose_yaw + delta_yaw * 0.5
-            self._pose_x    += delta_center * math.cos(mid_yaw)
-            self._pose_y    += delta_center * math.sin(mid_yaw)
-            self._pose_yaw  += delta_yaw
-            self._vel_x      = delta_center / dt
-            self._vel_yaw    = delta_yaw    / dt
+            mid_yaw         = self._pose_yaw + delta_yaw * 0.5
+            self._pose_x   += delta_center * math.cos(mid_yaw)
+            self._pose_y   += delta_center * math.sin(mid_yaw)
+            self._pose_yaw += delta_yaw
+            self._vel_x     = delta_center / dt
+            self._vel_yaw   = delta_yaw    / dt
 
             x   = self._pose_x
             y   = self._pose_y
@@ -212,39 +199,30 @@ class MotorNode(Node):
             vx  = self._vel_x
             wz  = self._vel_yaw
 
-        # ── /odom 게시 + TF 브로드캐스트 ─────────────────────────
         stamp = self.get_clock().now().to_msg()
         self._publish_odom(x, y, yaw, vx, wz, stamp)
 
     # ══════════════════════════════════════════════════════════════
-    # 오도메트리 게시 헬퍼
+    # 오도메트리 게시 (/odom_motor 전용, TF 발행 없음)
     # ══════════════════════════════════════════════════════════════
 
     @staticmethod
     def _yaw_to_quaternion(yaw: float) -> tuple:
-        """Yaw (rad) → Quaternion (qx, qy, qz, qw)."""
         half = yaw * 0.5
         return (0.0, 0.0, math.sin(half), math.cos(half))
 
-    def _publish_odom(
-        self,
-        x: float, y: float, yaw: float,
-        vx: float, wz: float,
-        stamp,
-    ) -> None:
+    def _publish_odom(self, x, y, yaw, vx, wz, stamp) -> None:
         """
-        /odom 토픽 게시 + odom → base_link TF 브로드캐스트.
-        이 메서드는 CAN Notifier 콜백(백그라운드 스레드)에서 호출됨.
+        /odom_motor (nav_msgs/Odometry) 게시.
+        TF는 ekf_node가 단독 발행 — 이 노드는 TF를 발행하지 않음.
         """
         qx, qy, qz, qw = self._yaw_to_quaternion(yaw)
 
-        # ── Odometry 메시지 ───────────────────────────────────────
         odom = Odometry()
-        odom.header.stamp     = stamp
-        odom.header.frame_id  = self._odom_frame
-        odom.child_frame_id   = self._base_frame
+        odom.header.stamp    = stamp
+        odom.header.frame_id = self._odom_frame
+        odom.child_frame_id  = self._base_frame   # base_footprint
 
-        # 위치
         odom.pose.pose.position.x    = x
         odom.pose.pose.position.y    = y
         odom.pose.pose.position.z    = 0.0
@@ -253,55 +231,33 @@ class MotorNode(Node):
         odom.pose.pose.orientation.z = qz
         odom.pose.pose.orientation.w = qw
 
-        # 속도
         odom.twist.twist.linear.x  = vx
         odom.twist.twist.linear.y  = 0.0
         odom.twist.twist.angular.z = wz
 
-        # 공분산 (대각 원소만 설정, 나머지 0)
-        # pose: [x, y, z, roll, pitch, yaw] — 2D이므로 x, y, yaw만 유효
-        odom.pose.covariance[0]  = 0.01   # x
-        odom.pose.covariance[7]  = 0.01   # y
-        odom.pose.covariance[35] = 0.05   # yaw
-        # twist: [vx, vy, vz, wx, wy, wz]
+        # 공분산 (대각 원소, 2D 주행)
+        odom.pose.covariance[0]  = 0.05   # x
+        odom.pose.covariance[7]  = 0.05   # y
+        odom.pose.covariance[35] = 0.1    # yaw
         odom.twist.covariance[0]  = 0.01  # vx
         odom.twist.covariance[35] = 0.05  # wz
 
         self._pub_odom.publish(odom)
 
-        # ── TransformStamped (odom → base_link) ──────────────────
-        # tf_msg = TransformStamped()
-        # tf_msg.header.stamp     = stamp
-        # tf_msg.header.frame_id  = self._odom_frame
-        # tf_msg.child_frame_id   = self._base_frame
-
-        # tf_msg.transform.translation.x = x
-        # tf_msg.transform.translation.y = y
-        # tf_msg.transform.translation.z = 0.0
-        # tf_msg.transform.rotation.x    = qx
-        # tf_msg.transform.rotation.y    = qy
-        # tf_msg.transform.rotation.z    = qz
-        # tf_msg.transform.rotation.w    = qw
-
-        # self._tf_broadcaster.sendTransform(tf_msg)
-
     # ══════════════════════════════════════════════════════════════
-    # cmd_vel 처리 (TX: 모터 명령)
+    # cmd_vel Mux
     # ══════════════════════════════════════════════════════════════
 
     def _mode_cb(self, msg: String) -> None:
         with self._mode_lock:
-            old        = self._mode
-            self._mode = msg.data
+            old, self._mode = self._mode, msg.data
         if old != msg.data:
             self.get_logger().info(f'[MODE] {old} → {msg.data}')
             self._send_can(0, 0, 0, 0)
 
     def _estop_cb(self, msg: Bool) -> None:
         with self._estop_lock:
-            prev              = self._is_estopped
-            self._is_estopped = msg.data
-
+            prev, self._is_estopped = self._is_estopped, msg.data
         if msg.data and not prev:
             self.get_logger().warn('[E-STOP] 발동!')
             self._send_can(0, 0, 0, 0)
@@ -314,71 +270,52 @@ class MotorNode(Node):
 
     def _keyboard_cb(self, msg: Twist) -> None:
         with self._mode_lock:
-            if self._mode != 'MANUAL':
-                return
+            if self._mode != 'MANUAL': return
         with self._estop_lock:
             if self._is_estopped:
-                self._send_can(0, 0, 0, 0)
-                return
+                self._send_can(0, 0, 0, 0); return
         self._apply_twist(msg)
 
     def _nav2_cb(self, msg: Twist) -> None:
         with self._mode_lock:
-            if self._mode != 'AUTO':
-                return
+            if self._mode != 'AUTO': return
         with self._estop_lock:
             if self._is_estopped:
-                self._send_can(0, 0, 0, 0)
-                return
+                self._send_can(0, 0, 0, 0); return
         self._apply_twist(msg)
 
-    # ── Mecanum IK (Vy=0, 스키드-스티어 동작) ─────────────────────
     def _apply_twist(self, msg: Twist) -> None:
-        """
-        Twist → Mecanum X-구성 IK (Vy=0 강제) → CAN TX 0x123.
-        방향 반전 보정은 STM32 motor.h DIR_INVERT에서 처리.
-        """
+        """Mecanum X-구성 IK (Vy=0 강제) → CAN TX 0x123."""
         Vx = max(-1.0, min(1.0, float(msg.linear.x)))
         Wz = max(-1.0, min(1.0, float(msg.angular.z)))
-        # Vy = 0 (스트레이핑 비활성화)
+        N  = self._max_speed
 
-        N = self._max_speed
+        fl = max(-N, min(N, int((Vx - Wz) * N)))
+        fr = max(-N, min(N, int((Vx + Wz) * N)))
+        rl = max(-N, min(N, int((Vx - Wz) * N)))
+        rr = max(-N, min(N, int((Vx + Wz) * N)))
 
-        fl_can = int((Vx - Wz) * N)
-        fr_can = int((Vx + Wz) * N)
-        rl_can = int((Vx - Wz) * N)
-        rr_can = int((Vx + Wz) * N)
-
-        fl_can = max(-N, min(N, fl_can))
-        fr_can = max(-N, min(N, fr_can))
-        rl_can = max(-N, min(N, rl_can))
-        rr_can = max(-N, min(N, rr_can))
-
-        self._send_can(fl_can, fr_can, rl_can, rr_can)
+        self._send_can(fl, fr, rl, rr)
         self.get_logger().debug(
             f'[TX] Vx={Vx:+.3f} Wz={Wz:+.3f} | '
-            f'FL={fl_can:+6d} FR={fr_can:+6d} RL={rl_can:+6d} RR={rr_can:+6d}'
+            f'FL={fl:+6d} FR={fr:+6d} RL={rl:+6d} RR={rr:+6d}'
         )
 
-    # ── CAN TX ────────────────────────────────────────────────────
     def _send_can(self, fl: int, fr: int, rl: int, rr: int) -> None:
-        """8-바이트 Big-Endian CAN 프레임 전송 (ID 0x123)."""
         data = struct.pack('>hhhh', fl, fr, rl, rr)
-        tx_msg = can.Message(
-            arbitration_id=self._can_id,
-            data=data,
-            is_extended_id=False,
-        )
         try:
-            self._bus.send(tx_msg)
+            self._bus.send(can.Message(
+                arbitration_id=self._can_id,
+                data=data,
+                is_extended_id=False,
+            ))
         except can.CanError as exc:
             self.get_logger().error(f'[CAN TX ERROR] {exc}')
 
-    # ── 노드 소멸 ─────────────────────────────────────────────────
     def destroy_node(self):
         try:
-            self._notifier.stop()       # CAN RX 백그라운드 스레드 종료
-            self._send_can(0, 0, 0, 0)  # 긴급 정지 송신
+            self._notifier.stop()
+            self._send_can(0, 0, 0, 0)
             self._bus.shutdown()
         except Exception:
             pass

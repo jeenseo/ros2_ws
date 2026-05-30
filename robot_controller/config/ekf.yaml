@@ -1,29 +1,34 @@
 # ekf.yaml
 # ========
 # robot_localization EKF 노드 설정
-# IMU (MPU6050) + LiDAR 오도메트리 (rf2o) 융합
+# 3-소스 융합: 엔코더 오도메트리 + LiDAR 오도메트리 + IMU
 #
 # 상태 벡터 (15원소):
 #   [x, y, z, roll, pitch, yaw, vx, vy, vz, vroll, vpitch, vyaw, ax, ay, az]
 #
 # 소스 구성:
-#   odom0 (/odom_rf2o)  : LiDAR 스캔 매칭 오도메트리
-#   imu0  (/imu/data)   : MPU6050 IMU
-#   odom1 (/odom_wheel) : 휠 오도메트리 [스켈레톤 - 전부 false, 추후 활성화]
+#   odom0 (/odom_rf2o)  : LiDAR 스캔 매칭 (X, Y, Yaw, Vx, Wz)
+#   imu0  (/imu/data)   : MPU6050 IMU (Yaw, Wz)
+#   odom1 (/odom_motor) : 엔코더 휠 오도메트리 (X, Y, Yaw, Vx, Wz) ← 활성화됨
 #
-# TF 발행: odom → base_footprint (EKF가 담당, rf2o publish_tf=False)
+# TF 발행 규칙:
+#   ekf_node만 odom → base_footprint TF 발행 (publish_tf: true)
+#   motor_node, rf2o: TF 발행 금지
 
 ekf_node:
   ros__parameters:
 
     # ── 기본 설정 ─────────────────────────────────────────────────
-    frequency:            30.0    # EKF 갱신 주파수 (Hz)
-    sensor_timeout:       0.1     # 센서 데이터 타임아웃 (초)
-    two_d_mode:           true    # 2D 주행 (z, roll, pitch 무시)
+    frequency:             30.0    # EKF 갱신 주파수 (Hz)
+    sensor_timeout:        0.1     # 센서 데이터 타임아웃 (초)
+    two_d_mode:            true    # 2D 주행 (z, roll, pitch 무시)
     transform_time_offset: 0.0
     transform_timeout:     0.0
-    print_diagnostics:    true
-    debug:                false
+    print_diagnostics:     true
+    debug:                 false
+    # [중요] EKF만이 odom → base_footprint TF를 발행
+    # 다른 노드(motor_node, rf2o)는 TF 발행 금지
+    publish_tf:            true
 
     # ── 프레임 설정 ───────────────────────────────────────────────
     map_frame:       map
@@ -42,10 +47,12 @@ ekf_node:
     #                  vx,    vy,    vz,
     #                  vroll, vpitch,vyaw,
     #                  ax,    ay,    az]
+    # [x, y, z, roll, pitch, yaw, vx, vy, vz, vroll, vpitch, vyaw, ax, ay, az]
+    # rf2o: X, Y, Yaw (위치) + Vx, Wz (속도) 사용. Vy=0 (스키드-스티어)
     odom0_config: [true,  true,  false,
-                   false, false, false,
-                   true,  true, false,
-                   false, false, false,
+                   false, false, true,
+                   true,  false, false,
+                   false, false, true,
                    false, false, false]
 
     odom0_queue_size:     5
@@ -77,21 +84,22 @@ ekf_node:
     imu0_remove_gravitational_acceleration: true  # 중력 가속도 제거
 
     # ─────────────────────────────────────────────────────────────
-    # odom1: 휠 오도메트리 [스켈레톤 — 현재 비활성화]
-    # 모터 엔코더가 동작하면 각 원소를 true로 변경
+    # odom1: 엔코더 휠 오도메트리 (/odom_motor) ← 활성화됨
+    # motor_node.py 출력 (TF 발행 없음, EKF가 TF 담당)
     # ─────────────────────────────────────────────────────────────
-    odom1: /odom_wheel
+    odom1: /odom_motor
 
-    # 전부 false: 활성화 시 true로 변경 (vx, vyaw 권장)
-    odom1_config: [false, false, false,
-                   false, false, false,
-                   false, false, false,
-                   false, false, false,
+    # [x, y, z, roll, pitch, yaw, vx, vy, vz, vroll, vpitch, vyaw, ax, ay, az]
+    # 엔코더: X, Y, Yaw (위치) + Vx, Wz (속도) 사용. Vy=0 (스키드-스티어)
+    odom1_config: [true,  true,  false,
+                   false, false, true,
+                   true,  false, false,
+                   false, false, true,
                    false, false, false]
 
     odom1_queue_size:     5
     odom1_nodelay:        false
-    odom1_differential:   false
+    odom1_differential:   false   # 절대 위치 사용
     odom1_relative:       false
 
     # ─────────────────────────────────────────────────────────────
