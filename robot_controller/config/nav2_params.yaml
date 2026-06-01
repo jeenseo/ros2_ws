@@ -120,24 +120,27 @@ controller_server:
     FollowPath:
       plugin:                              "dwb_core::DWBLocalPlanner"
       debug_trajectory_details:            True
-      min_vel_x:                           0.0
+      min_vel_x:                           0.20
       min_vel_y:                           0.0
-      max_vel_x:                           0.22
+      max_vel_x:                           0.40
       max_vel_y:                           0.0
       # [수정] 0.4 → 0.8: 더 빠른 회전 허용 → 경로 추종 능력 향상
       # [수정] 서빙 로봇 스타일 회전/속도 최적화
-      max_vel_theta:                       0.4    # 0.2 → 0.4: 장애물 회피 시 빠른 방향 전환
-      min_speed_xy:                        0.07   # 0.1 → 0.07: 비례 데드밴드 수정 후 미속 허용
-      max_speed_xy:                        0.22
+      max_vel_theta:                       0.4
+      # [최종 수정] min_speed_xy: 물리 최소 속도(DEADBAND≈0.195 m/s)에 맞춤
+      # DWB가 0.15 m/s 이상만 샘플링 → STM32 미속 스톨/지터 완전 차단
+      # Nav2 계획 속도 ≥ 실제 최소 속도 → 5초 재계획 지연 해소
+      min_speed_xy:                        0.20   # 0.07 → 0.15: 물리 최소값 일치
+      max_speed_xy:                        0.40
       min_speed_theta:                     0.1
-      # 서빙 로봇: 부드러운 출발 (너무 강한 가속은 음식 출렁임 유발)
-      acc_lim_x:                           0.15   # 0.2 → 0.15: 부드러운 직선 가속
+      # acc_lim_x 강화: 0→0.15 m/s 도달을 빠르게 → 출발 딜레이 최소화
+      acc_lim_x:                           0.30   # 0.15 → 0.30: 빠른 최소속도 도달
       acc_lim_y:                           0.0
-      acc_lim_theta:                       0.3    # 0.2 → 0.3: 회전 반응성 향상
-      # 장애물 접근 시 자연스러운 감속 (너무 강하면 급정지 느낌)
-      decel_lim_x:                         -0.25  # -0.4 → -0.25: 여유있는 감속
+      acc_lim_theta:                       0.3
+      # decel_lim_x 강화: 장애물 앞 깔끔한 급정지 허용
+      decel_lim_x:                         -0.40  # -0.25 → -0.40: 강한 제동
       decel_lim_y:                         0.0
-      decel_lim_theta:                     -0.3   # -0.2 → -0.3: 회전 정지 향상
+      decel_lim_theta:                     -0.3
       vx_samples:                          10
       vy_samples:                          0 # 꽃게 걸음 0 높이면 꽃게 걸음 가능
       vtheta_samples:                      10
@@ -146,7 +149,9 @@ controller_server:
       angular_granularity:                 0.025
       transform_tolerance:                 1.0
       xy_goal_tolerance:                   0.3
-      trans_stopped_velocity:              0.05
+      # [수정] trans_stopped_velocity: min_speed_xy 아래로 여유를 두어 명확한 경계 설정
+      # 0.10 < v < 0.15: 도달 불가 구간 → DWB는 0 또는 ≥0.15만 선택
+      trans_stopped_velocity:              0.20   # 0.05 → 0.10
       short_circuit_trajectory_evaluation: True
       stateful:                            True
       critics: ["RotateToGoal", "Oscillation", "BaseObstacle", "GoalAlign",
@@ -359,8 +364,8 @@ velocity_smoother:
     # [수정] DWB 파라미터와 완전 동기화 (velocity_smoother != controller_server 시 surge 발생)
     max_velocity:         [0.22, 0.0, 0.4]
     min_velocity:         [-0.22, 0.0, -0.4]
-    max_accel:            [0.15, 0.0, 0.3]
-    max_decel:            [-0.25, 0.0, -0.3]
+    max_accel:            [0.30, 0.0, 0.3]
+    max_decel:            [-0.40, 0.0, -0.3]
     odom_topic:           "odom"
     odom_duration:        0.1
     deadband_velocity:    [0.0, 0.0, 0.0]
