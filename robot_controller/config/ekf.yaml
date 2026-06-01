@@ -53,7 +53,7 @@ ekf_node:
     # rf2o: X, Y 위치 + Yaw (보조: 장기 드리프트 보정 역할)
     # rf2o의 covariance가 IMU보다 크므로 EKF가 자동으로 낮은 가중치 부여 → gentle correction
     odom0_config: [true,  true,  false,
-                   false, false, true,   # Yaw 활성화 (보조 드리프트 보정)
+                   false, false, false,   # Yaw 활성화 (보조 드리프트 보정)
                    false, false, false,
                    false, false, false,
                    false, false, false]
@@ -80,7 +80,7 @@ ekf_node:
     imu0_config: [false, false, false,
                   false, false, true,   # Yaw 활성화 (1차 회전 소스)
                   false, false, false,
-                  false, false, true,   # Wz 유지
+                  false, false, false,   # Wz 유지
                   false, false, false]
 
     imu0_nodelay:                         false
@@ -101,7 +101,7 @@ ekf_node:
     odom1_config: [false, false, false,
                    false, false, false,
                    true,  false, false,
-                   false, false, true,
+                   false, false, false,
                    false, false, false]
 
     odom1_queue_size:     5

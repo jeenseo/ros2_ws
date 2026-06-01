@@ -120,23 +120,23 @@ controller_server:
     FollowPath:
       plugin:                              "dwb_core::DWBLocalPlanner"
       debug_trajectory_details:            True
-      # 🚀 [수정 완료] 순수 선형 제어 (물리적 한계 강제 적용)
-      min_vel_x:                           0.20
+      # [최종] 2단계 피드포워드 + 미속 제어 허용
+      min_vel_x:                           0.0    # DWB 정지 허용 (0.0 필수)
       min_vel_y:                           0.0
-      max_vel_x:                           0.40
+      max_vel_x:                           0.22
       max_vel_y:                           0.0
       max_vel_theta:                       0.4
-      min_speed_xy:                        0.20
-      max_speed_xy:                        0.40
+      # min_speed_xy=0.05: 2단계 피드포워드로 0.05 m/s(≈8 RPM) 스티션 없이 구동 가능
+      min_speed_xy:                        0.05   # 0.20 → 0.05: 미속 제어 허용
+      max_speed_xy:                        0.22
       min_speed_theta:                     0.1
-      
-      # 🚀 [수정 완료] 클로드가 분석한 수학적 최적 가감속 제약 (1 스텝 점프/제동 허용)
-      acc_lim_x:                           1.0    # 0 -> 0.20으로 0.2초 만에 점프
+      # 부드러운 가감속 (서빙 로봇 자연스러운 주행)
+      acc_lim_x:                           0.30   # 1.0 → 0.30: 부드러운 가속
       acc_lim_y:                           0.0
-      acc_lim_theta:                       0.5
-      decel_lim_x:                         -1.0   # 목표 앞에서 질질 끌지 않고 칼브레이크
+      acc_lim_theta:                       0.4
+      decel_lim_x:                         -0.50  # -1.0 → -0.50: 적절한 감속
       decel_lim_y:                         0.0
-      decel_lim_theta:                     -0.5
+      decel_lim_theta:                     -0.4
       
       vx_samples:                          10
       vy_samples:                          0
@@ -147,14 +147,16 @@ controller_server:
       transform_tolerance:                 1.0
       xy_goal_tolerance:                   0.3
       
-      # 🚀 [수정 완료] 정지 전환 속도의 틈새 설정
-      trans_stopped_velocity:              0.15
+      # trans_stopped_velocity: min_speed_xy 아래로 명확한 경계 (0.03 < 0.05)
+      trans_stopped_velocity:              0.03   # 0.15 → 0.03
       
       short_circuit_trajectory_evaluation: True
       stateful:                            True
       critics: ["RotateToGoal", "Oscillation", "BaseObstacle", "GoalAlign",
                 "PathAlign", "PathDist", "GoalDist"]
-      BaseObstacle.scale:              0.1
+      # [수정] 장애물 회피 우선순위 강화: 0.1 → 0.5
+      # 장애물 근처에서 경로보다 회피를 우선시 → 충돌 방지
+      BaseObstacle.scale:              40.0    # 0.1 → 0.5
       PathAlign.scale:                 32.0
       PathAlign.forward_point_distance: 0.8
       GoalAlign.scale:                 16.0
@@ -171,7 +173,7 @@ local_costmap:
     ros__parameters:
       use_sim_time:       false
       update_frequency:   5.0
-      publish_frequency:  1.0  
+      publish_frequency:  5.0  
       global_frame:       odom
       robot_base_frame:   base_footprint
       transform_tolerance: 1.0 
@@ -185,8 +187,9 @@ local_costmap:
       
       inflation_layer:
         plugin:              "nav2_costmap_2d::InflationLayer"
-        cost_scaling_factor: 5.0
-        inflation_radius:    0.45
+        # [수정] 장애물 조기 감지: radius 0.45→0.55, scaling 5.0→2.5 (완만한 비용 감쇠)
+        cost_scaling_factor: 2.5
+        inflation_radius:    0.55
         
       obstacle_layer:
         plugin:               "nav2_costmap_2d::ObstacleLayer"
@@ -338,10 +341,10 @@ velocity_smoother:
     scale_velocities:     False
     feedback:             "OPEN_LOOP"
     # 🚀 [수정 완료] DWB의 가감속 제한과 동일하게 맞춰서 스무더가 방해하지 못하게 함
-    max_velocity:         [0.40, 0.0, 0.4]    
-    min_velocity:         [-0.40, 0.0, -0.4]
-    max_accel:            [1.0, 0.0, 0.5]     
-    max_decel:            [-1.0, 0.0, -0.5]   
+    max_velocity:         [0.22, 0.0, 0.4]
+    min_velocity:         [-0.22, 0.0, -0.4]
+    max_accel:            [0.30, 0.0, 0.4]
+    max_decel:            [-0.50, 0.0, -0.4]
     odom_topic:           "odom"
     odom_duration:        0.1
     deadband_velocity:    [0.0, 0.0, 0.0]

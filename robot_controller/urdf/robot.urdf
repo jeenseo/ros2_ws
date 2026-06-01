@@ -1,4 +1,15 @@
 <?xml version="1.0"?>
+<!--
+  robot.urdf — Self-delivery Robot
+  물리 실측 기반 치수 (Hardware-Synced)
+
+  수정 이력:
+    - 바퀴 실린더 반지름: 0.04 → 0.06m (실측 6cm)
+    - 바퀴 조인트 z: 0.04 → 0.06m (바퀴 중심 = 반지름)
+    - base_link 시각화 z: 0.35 → 0.33m (0.06 + 0.54/2 = 0.33)
+    - lidar_joint z: 0.670 → 0.355m (실측 35.5cm)
+    - imu_joint x/z: 0.180/0.6225 → 0.160/0.325m (lidar 3cm 아래)
+-->
 <robot name="self_delivery_robot">
 
   <material name="blue">
@@ -14,6 +25,7 @@
     <color rgba="0.5 0.5 0.5 1.0"/>
   </material>
 
+  <!-- base_footprint: 지면 기준 가상 링크 -->
   <link name="base_footprint"/>
 
   <joint name="base_footprint_joint" type="fixed">
@@ -22,41 +34,50 @@
     <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
 
+  <!--
+    base_link: 로봇 메인 프레임
+    chassis_center_z = wheel_radius + chassis_height/2 = 0.06 + 0.27 = 0.33m
+  -->
   <link name="base_link">
     <visual>
-      <origin xyz="0.0 0.0 0.35" rpy="0 0 0"/>
+      <origin xyz="0.0 0.0 0.33" rpy="0 0 0"/>
       <geometry>
         <box size="0.50 0.40 0.54"/>
       </geometry>
       <material name="blue"/>
     </visual>
     <collision>
-      <origin xyz="0.0 0.0 0.35" rpy="0 0 0"/>
+      <origin xyz="0.0 0.0 0.33" rpy="0 0 0"/>
       <geometry>
         <box size="0.50 0.40 0.54"/>
       </geometry>
     </collision>
     <inertial>
-      <origin xyz="0.0 0.0 0.35" rpy="0 0 0"/>
-      <mass value="12.0"/>
+      <origin xyz="0.0 0.0 0.33" rpy="0 0 0"/>
+      <mass value="10.0"/>
       <inertia ixx="0.3492" ixy="0.0" ixz="0.0"
                iyy="0.3808" iyz="0.0"
                izz="0.1733"/>
     </inertial>
   </link>
 
+  <!--
+    바퀴: 실측 반지름 0.06m (직경 12cm), 폭 0.05m
+    z = wheel_radius = 0.06m (바퀴 중심 높이)
+    y = ±0.255m → 트랙폭 0.51m
+  -->
   <link name="wheel_front_left_link">
     <visual>
       <origin xyz="0 0 0" rpy="1.5707963 0 0"/>
       <geometry>
-        <cylinder radius="0.04" length="0.05"/>
+        <cylinder radius="0.06" length="0.05"/>
       </geometry>
       <material name="black"/>
     </visual>
     <collision>
       <origin xyz="0 0 0" rpy="1.5707963 0 0"/>
       <geometry>
-        <cylinder radius="0.04" length="0.05"/>
+        <cylinder radius="0.06" length="0.05"/>
       </geometry>
     </collision>
     <inertial>
@@ -70,21 +91,21 @@
   <joint name="wheel_front_left_joint" type="fixed">
     <parent link="base_link"/>
     <child  link="wheel_front_left_link"/>
-    <origin xyz="0.25 0.255 0.04" rpy="0 0 0"/>
+    <origin xyz="0.25 0.255 0.06" rpy="0 0 0"/>
   </joint>
 
   <link name="wheel_front_right_link">
     <visual>
       <origin xyz="0 0 0" rpy="1.5707963 0 0"/>
       <geometry>
-        <cylinder radius="0.04" length="0.05"/>
+        <cylinder radius="0.06" length="0.05"/>
       </geometry>
       <material name="black"/>
     </visual>
     <collision>
       <origin xyz="0 0 0" rpy="1.5707963 0 0"/>
       <geometry>
-        <cylinder radius="0.04" length="0.05"/>
+        <cylinder radius="0.06" length="0.05"/>
       </geometry>
     </collision>
     <inertial>
@@ -98,21 +119,21 @@
   <joint name="wheel_front_right_joint" type="fixed">
     <parent link="base_link"/>
     <child  link="wheel_front_right_link"/>
-    <origin xyz="0.25 -0.255 0.04" rpy="0 0 0"/>
+    <origin xyz="0.25 -0.255 0.06" rpy="0 0 0"/>
   </joint>
 
   <link name="wheel_rear_left_link">
     <visual>
       <origin xyz="0 0 0" rpy="1.5707963 0 0"/>
       <geometry>
-        <cylinder radius="0.04" length="0.05"/>
+        <cylinder radius="0.06" length="0.05"/>
       </geometry>
       <material name="black"/>
     </visual>
     <collision>
       <origin xyz="0 0 0" rpy="1.5707963 0 0"/>
       <geometry>
-        <cylinder radius="0.04" length="0.05"/>
+        <cylinder radius="0.06" length="0.05"/>
       </geometry>
     </collision>
     <inertial>
@@ -126,21 +147,21 @@
   <joint name="wheel_rear_left_joint" type="fixed">
     <parent link="base_link"/>
     <child  link="wheel_rear_left_link"/>
-    <origin xyz="-0.25 0.255 0.04" rpy="0 0 0"/>
+    <origin xyz="-0.25 0.255 0.06" rpy="0 0 0"/>
   </joint>
 
   <link name="wheel_rear_right_link">
     <visual>
       <origin xyz="0 0 0" rpy="1.5707963 0 0"/>
       <geometry>
-        <cylinder radius="0.04" length="0.05"/>
+        <cylinder radius="0.06" length="0.05"/>
       </geometry>
       <material name="black"/>
     </visual>
     <collision>
       <origin xyz="0 0 0" rpy="1.5707963 0 0"/>
       <geometry>
-        <cylinder radius="0.04" length="0.05"/>
+        <cylinder radius="0.06" length="0.05"/>
       </geometry>
     </collision>
     <inertial>
@@ -154,9 +175,14 @@
   <joint name="wheel_rear_right_joint" type="fixed">
     <parent link="base_link"/>
     <child  link="wheel_rear_right_link"/>
-    <origin xyz="-0.25 -0.255 0.04" rpy="0 0 0"/>
+    <origin xyz="-0.25 -0.255 0.06" rpy="0 0 0"/>
   </joint>
 
+  <!--
+    lidar_link: RPLIDAR A1
+    z = 35.5cm (로봇 3D 중심 30.5cm + 오프셋 5cm)
+    yaw = 180° (물리 장착 방향 보정)
+  -->
   <link name="lidar_link">
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0"/>
@@ -182,9 +208,13 @@
   <joint name="lidar_joint" type="fixed">
     <parent link="base_link"/>
     <child  link="lidar_link"/>
-    <origin xyz="0.160 0.0 0.670" rpy="0 0 3.14159"/>
+    <origin xyz="0.160 0.0 0.355" rpy="0 0 3.14159"/>
   </joint>
 
+  <!--
+    imu_link: MPU6050
+    z = lidar_z - 0.030 = 0.355 - 0.030 = 0.325m
+  -->
   <link name="imu_link">
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0"/>
@@ -210,7 +240,7 @@
   <joint name="imu_joint" type="fixed">
     <parent link="base_link"/>
     <child  link="imu_link"/>
-    <origin xyz="0.180 0.0 0.6225" rpy="0 0 0"/>
+    <origin xyz="0.160 0.0 0.325" rpy="0 0 0"/>
   </joint>
 
 </robot>
