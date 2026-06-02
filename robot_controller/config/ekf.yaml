@@ -20,7 +20,7 @@ ekf_node:
 
     # ── 기본 설정 ─────────────────────────────────────────────────
     frequency:             30.0    # EKF 갱신 주파수 (Hz)
-    sensor_timeout:        0.1     # 센서 데이터 타임아웃 (초)
+    sensor_timeout:        0.4     # [수정] 0.1→0.4: 빠른 회전 중 rf2o 실패 허용 (Dead-Reckoning 폴백)
     two_d_mode:            true    # 2D 주행 (z, roll, pitch 무시)
     transform_time_offset: 0.0
     transform_timeout:     0.0
@@ -60,8 +60,10 @@ ekf_node:
 
     odom0_queue_size:     5
     odom0_nodelay:        false
-    odom0_differential:   false   # 절대 위치 사용 (false = 절대값)
-    odom0_relative:       false
+    odom0_differential:   false
+    # [수정] false→true: rf2o를 증분 변화량으로 처리
+    # 회전 중 brief failure가 발생해도 전역 위치 점프 방지
+    odom0_relative:       true
 
     # ─────────────────────────────────────────────────────────────
     # imu0: MPU6050 IMU (/imu/data)
@@ -77,10 +79,11 @@ ekf_node:
     # [x, y, z, roll, pitch, yaw, vx, vy, vz, vroll, vpitch, vyaw, ax, ay, az]
     # IMU: Yaw(절대) + Wz(속도) — 고주파 회전 추적 1차 소스
     # ORIENTATION_COV=1e-4, ANGULAR_VEL_COV=1e-5 (mpu6050_node.py)
+    # IMU: Yaw(index5) + Wz(index11) — 회전 추적 1차 소스
     imu0_config: [false, false, false,
                   false, false, true,   # Yaw 활성화 (1차 회전 소스)
                   false, false, false,
-                  false, false, false,   # Wz 유지
+                  false, false, true,   # Wz 각속도 활성화
                   false, false, false]
 
     imu0_nodelay:                         false
@@ -114,9 +117,11 @@ ekf_node:
     # 순서: x, y, z, roll, pitch, yaw, vx, vy, vz,
     #        vroll, vpitch, vyaw, ax, ay, az
     # ─────────────────────────────────────────────────────────────
+    # [수정] x,y 프로세스 노이즈 0.05→0.20: 회전 중 rf2o 실패 허용
+    # 큰 Q → EKF가 rf2o garbage 값에 덜 민감하게 반응
     process_noise_covariance: [
-      0.05,   0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,
-      0.0,    0.05,   0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,
+      0.20,   0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,
+      0.0,    0.20,   0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,
       0.0,    0.0,    0.06,   0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,
       0.0,    0.0,    0.0,    0.03,   0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,
       0.0,    0.0,    0.0,    0.0,    0.03,   0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,

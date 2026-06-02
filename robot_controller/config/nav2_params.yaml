@@ -118,54 +118,68 @@ controller_server:
       latch_xy_goal_tolerance: true      # 반경 진입 시 즉시 모터 끄고 관성으로 스르륵 안착!
 
     FollowPath:
-      plugin:                              "dwb_core::DWBLocalPlanner"
-      debug_trajectory_details:            True
-      # [최종] 2단계 피드포워드 + 미속 제어 허용
-      min_vel_x:                           0.0    # DWB 정지 허용 (0.0 필수)
-      min_vel_y:                           0.0
-      max_vel_x:                           0.30
-      max_vel_y:                           0.0
-      max_vel_theta:                       0.3
-      # min_speed_xy=0.05: 2단계 피드포워드로 0.05 m/s(≈8 RPM) 스티션 없이 구동 가능
-      min_speed_xy:                        0.05   # 0.20 → 0.05: 미속 제어 허용
-      max_speed_xy:                        0.40
-      min_speed_theta:                     0.1
-      # 부드러운 가감속 (서빙 로봇 자연스러운 주행)
-      acc_lim_x:                           0.20   # 1.0 → 0.30: 부드러운 가속
-      acc_lim_y:                           0.0
-      acc_lim_theta:                       0.20
-      decel_lim_x:                         -0.20  # -1.0 → -0.50: 적절한 감속
-      decel_lim_y:                         0.0
-      decel_lim_theta:                     -0.20
-      
-      vx_samples:                          20
-      vy_samples:                          0
-      vtheta_samples:                      40
-      sim_time:                            3.0
-      linear_granularity:                  0.05
-      angular_granularity:                 0.025
-      transform_tolerance:                 1.0
-      xy_goal_tolerance:                   0.3
-      
-      # trans_stopped_velocity: min_speed_xy 아래로 명확한 경계 (0.03 < 0.05)
-      trans_stopped_velocity:              0.03   # 0.15 → 0.03
-      
-      short_circuit_trajectory_evaluation: True
-      stateful:                            True
-      critics: ["RotateToGoal", "Oscillation", "BaseObstacle", "GoalAlign",
-                "PathAlign", "PathDist", "GoalDist"]
-      # [수정] 장애물 회피 우선순위 강화: 0.1 → 0.5
-      # 장애물 근처에서 경로보다 회피를 우선시 → 충돌 방지
-      BaseObstacle.scale:              40.0    # 0.1 → 0.5
-      PathAlign.scale:                 12.0
-      PathAlign.forward_point_distance: 0.3
-      GoalAlign.scale:                 12.0
-      GoalAlign.forward_point_distance: 0.3
-      PathDist.scale:                  12.0
-      GoalDist.scale:                  20.0
-      RotateToGoal.scale:              24.0
-      RotateToGoal.slowing_factor:     3.0
-      RotateToGoal.lookahead_time:     -1.0
+      # [DWB → MPPI 전환]
+      # DWB는 "fast linear, slow angular" 제약에서 구조적으로 late swerve 발생
+      # MPPI: 병렬 몬테카를로 샘플링 → 더 넓은 회피 공간, 동적 장애물에 강함
+      plugin: "nav2_mppi_controller::MPPIController"
+
+      # ── 시간/샘플 설정 ────────────────────────────────────────
+      time_steps:      56       # 56 × 0.05 = 2.8초 예측 지평선
+      model_dt:        0.05     # 50ms 단위 롤아웃
+      batch_size:      2000     # 병렬 궤적 수 (Pi5 CPU에서 적정값)
+      iteration_count: 1
+      temperature:     0.3      # 낮을수록 최적 궤적 집중
+      gamma:           0.015
+
+      # ── 속도 한계 ─────────────────────────────────────────────
+      vx_max:    0.22
+      vx_min:   -0.10
+      vy_max:    0.0
+      vy_min:    0.0
+      wz_max:    0.50    # MPPI는 ω를 DWB보다 효과적으로 활용
+      # 샘플 표준편차 (탐색 범위 제어)
+      vx_std:    0.15
+      wz_std:    0.30
+
+      # ── 최소 속도 (2단계 피드포워드와 호환) ──────────────────
+      motion_model: "DiffDrive"
+
+      # ── Critics (장애물 회피 우선) ────────────────────────────
+      critics:
+        - plugin: "mppi::ObstaclesCritic"
+          enabled:          true
+          critical_weight:  200.0   # 장애물 임박 시 극단적 패널티
+          repulsion_weight: 2.0
+          critical_distance: 0.35  # 35cm 이내 극단적 회피
+          collision_cost:   100000.0
+          near_goal_distance: 0.5
+
+        - plugin: "mppi::PathFollowCritic"
+          enabled:        true
+          offset_from_furthest: 5
+          max_path_ratio:  0.5
+
+        - plugin: "mppi::PathAngleCritic"
+          enabled:        true
+          offset_from_furthest: 4
+          threshold_to_consider: 0.40
+          max_angle_to_furthest: 1.0
+
+        - plugin: "mppi::GoalCritic"
+          enabled:            true
+          threshold_to_consider: 1.4
+
+        - plugin: "mppi::GoalAngleCritic"
+          enabled:            true
+          threshold_to_consider: 0.40
+
+        - plugin: "mppi::PreferForwardCritic"
+          enabled:      true
+          penalty_weight: 3.0
+
+        - plugin: "mppi::TwirlingCritic"
+          enabled:      true
+          twirling_cost_weight: 10.0
 
 # ─────────────────────────────────────────────────────────────────────────
 local_costmap: 
