@@ -1,7 +1,0 @@
-Metadata-Version: 2.1
-Name: robot-controller
-Version: 0.1.0
-Summary: Autonomous skid-steer robot controller (ROS 2 Jazzy) + Nav2
-Maintainer: user
-Maintainer-email: user@example.com
-License: MIT
