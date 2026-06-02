@@ -1,0 +1,99 @@
+[0.000000] (-) TimerEvent: {}
+[0.000487] (-) JobUnselected: {'identifier': 'rf2o_laser_odometry'}
+[0.000980] (-) JobUnselected: {'identifier': 'sllidar_ros2'}
+[0.001714] (robot_controller) JobQueued: {'identifier': 'robot_controller', 'dependencies': OrderedDict()}
+[0.002189] (robot_controller) JobStarted: {'identifier': 'robot_controller'}
+[0.099272] (-) TimerEvent: {}
+[0.199906] (-) TimerEvent: {}
+[0.300541] (-) TimerEvent: {}
+[0.401170] (-) TimerEvent: {}
+[0.501843] (-) TimerEvent: {}
+[0.602613] (-) TimerEvent: {}
+[0.703124] (-) TimerEvent: {}
+[0.803659] (-) TimerEvent: {}
+[0.904158] (-) TimerEvent: {}
+[1.004802] (-) TimerEvent: {}
+[1.105684] (-) TimerEvent: {}
+[1.206237] (-) TimerEvent: {}
+[1.306787] (-) TimerEvent: {}
+[1.407353] (-) TimerEvent: {}
+[1.507959] (-) TimerEvent: {}
+[1.608487] (-) TimerEvent: {}
+[1.709028] (-) TimerEvent: {}
+[1.809534] (-) TimerEvent: {}
+[1.910071] (-) TimerEvent: {}
+[2.010621] (-) TimerEvent: {}
+[2.111146] (-) TimerEvent: {}
+[2.211687] (-) TimerEvent: {}
+[2.312188] (-) TimerEvent: {}
+[2.412682] (-) TimerEvent: {}
+[2.513171] (-) TimerEvent: {}
+[2.613683] (-) TimerEvent: {}
+[2.714209] (-) TimerEvent: {}
+[2.814802] (-) TimerEvent: {}
+[2.915305] (-) TimerEvent: {}
+[3.015837] (-) TimerEvent: {}
+[3.116322] (-) TimerEvent: {}
+[3.216849] (-) TimerEvent: {}
+[3.317384] (-) TimerEvent: {}
+[3.417970] (-) TimerEvent: {}
+[3.518496] (-) TimerEvent: {}
+[3.619058] (-) TimerEvent: {}
+[3.719720] (-) TimerEvent: {}
+[3.820745] (-) TimerEvent: {}
+[3.891787] (robot_controller) Command: {'cmd': ['/usr/bin/python3', '-W', 'ignore:setup.py install is deprecated', '-W', 'ignore:easy_install command is deprecated', 'setup.py', 'egg_info', '--egg-base', '../build/robot_controller', 'build', '--build-base', '/home/jeen/ros2_ws/src/build/robot_controller/build', 'install', '--record', '/home/jeen/ros2_ws/src/build/robot_controller/install.log', '--single-version-externally-managed', 'install_data'], 'cwd': '/home/jeen/ros2_ws/src/robot_controller', 'env': {'LESSOPEN': '| /usr/bin/lesspipe %s', 'USER': 'jeen', 'SSH_CLIENT': '10.220.204.248 60930 22', 'GZ_CONFIG_PATH': '/opt/ros/jazzy/opt/gz_sim_vendor/share/gz:/opt/ros/jazzy/opt/sdformat_vendor/share/gz:/opt/ros/jazzy/opt/gz_gui_vendor/share/gz:/opt/ros/jazzy/opt/gz_transport_vendor/share/gz:/opt/ros/jazzy/opt/gz_rendering_vendor/share/gz:/opt/ros/jazzy/opt/gz_plugin_vendor/share/gz:/opt/ros/jazzy/opt/gz_fuel_tools_vendor/share/gz:/opt/ros/jazzy/opt/gz_msgs_vendor/share/gz:/opt/ros/jazzy/opt/gz_common_vendor/share/gz', 'XDG_SESSION_TYPE': 'tty', 'GIT_ASKPASS': '/home/jeen/.vscode-server/cli/servers/Stable-8761a5560cfd65fdd19ce7e2bd18dab5c0a4d84e/server/extensions/git/dist/askpass.sh', 'SHLVL': '1', 'LD_LIBRARY_PATH': '/opt/ros/jazzy/opt/gz_sim_vendor/lib:/opt/ros/jazzy/opt/gz_sensors_vendor/lib:/opt/ros/jazzy/opt/gz_physics_vendor/lib:/opt/ros/jazzy/opt/sdformat_vendor/lib:/opt/ros/jazzy/opt/rviz_ogre_vendor/lib:/opt/ros/jazzy/lib/aarch64-linux-gnu:/opt/ros/jazzy/opt/gz_gui_vendor/lib:/opt/ros/jazzy/opt/gz_transport_vendor/lib:/opt/ros/jazzy/opt/gz_rendering_vendor/lib:/opt/ros/jazzy/opt/gz_plugin_vendor/lib:/opt/ros/jazzy/opt/gz_fuel_tools_vendor/lib:/opt/ros/jazzy/opt/gz_msgs_vendor/lib:/opt/ros/jazzy/opt/gz_common_vendor/lib:/opt/ros/jazzy/opt/gz_math_vendor/lib:/opt/ros/jazzy/opt/gz_utils_vendor/lib:/opt/ros/jazzy/opt/gz_tools_vendor/lib:/opt/ros/jazzy/opt/gz_ogre_next_vendor/lib:/opt/ros/jazzy/opt/gz_dartsim_vendor/lib:/opt/ros/jazzy/opt/gz_cmake_vendor/lib:/opt/ros/jazzy/lib', 'BROWSER': '/home/jeen/.vscode-server/cli/servers/Stable-8761a5560cfd65fdd19ce7e2bd18dab5c0a4d84e/server/bin/helpers/browser.sh', 'HOME': '/home/jeen', 'TERM_PROGRAM_VERSION': '1.122.1', 'VSCODE_IPC_HOOK_CLI': '/run/user/1000/vscode-ipc-9e02cd5f-4428-4e1e-8074-538ac27cd8b5.sock', 'ROS_PYTHON_VERSION': '3', 'VSCODE_GIT_ASKPASS_MAIN': '/home/jeen/.vscode-server/cli/servers/Stable-8761a5560cfd65fdd19ce7e2bd18dab5c0a4d84e/server/extensions/git/dist/askpass-main.js', 'VSCODE_GIT_ASKPASS_NODE': '/home/jeen/.vscode-server/cli/servers/Stable-8761a5560cfd65fdd19ce7e2bd18dab5c0a4d84e/server/node', 'VSCODE_PYTHON_AUTOACTIVATE_GUARD': '1', 'DBUS_SESSION_BUS_ADDRESS': 'unix:path=/run/user/1000/bus', 'COLORTERM': 'truecolor', 'DEBUGINFOD_URLS': 'https://debuginfod.ubuntu.com', 'COLCON_PREFIX_PATH': '/home/jeen/ros2_ws/install', 'ROS_DISTRO': 'jazzy', 'LOGNAME': 'jeen', '_': '/usr/bin/colcon', 'ROS_VERSION': '2', 'XDG_SESSION_CLASS': 'user', 'TERM': 'xterm-256color', 'XDG_SESSION_ID': '2', 'ROS_LOCALHOST_ONLY': '0', 'PATH': '/home/jeen/.vscode-server/data/User/globalStorage/github.copilot-chat/debugCommand:/home/jeen/.vscode-server/data/User/globalStorage/github.copilot-chat/copilotCli:/home/jeen/.vscode-server/cli/servers/Stable-8761a5560cfd65fdd19ce7e2bd18dab5c0a4d84e/server/bin/remote-cli:/opt/ros/jazzy/opt/gz_msgs_vendor/bin:/opt/ros/jazzy/opt/gz_tools_vendor/bin:/opt/ros/jazzy/opt/gz_ogre_next_vendor/bin:/opt/ros/jazzy/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin', 'XDG_RUNTIME_DIR': '/run/user/1000', 'LANG': 'ko_KR.UTF-8', 'RMW_IMPLEMENTATION': 'rmw_cyclonedds_cpp', 'LS_COLORS': 'rs=0:di=01;34:ln=01;36:mh=00:pi=40;33:so=01;35:do=01;35:bd=40;33;01:cd=40;33;01:or=40;31;01:mi=00:su=37;41:sg=30;43:ca=00:tw=30;42:ow=34;42:st=37;44:ex=01;32:*.tar=01;31:*.tgz=01;31:*.arc=01;31:*.arj=01;31:*.taz=01;31:*.lha=01;31:*.lz4=01;31:*.lzh=01;31:*.lzma=01;31:*.tlz=01;31:*.txz=01;31:*.tzo=01;31:*.t7z=01;31:*.zip=01;31:*.z=01;31:*.dz=01;31:*.gz=01;31:*.lrz=01;31:*.lz=01;31:*.lzo=01;31:*.xz=01;31:*.zst=01;31:*.tzst=01;31:*.bz2=01;31:*.bz=01;31:*.tbz=01;31:*.tbz2=01;31:*.tz=01;31:*.deb=01;31:*.rpm=01;31:*.jar=01;31:*.war=01;31:*.ear=01;31:*.sar=01;31:*.rar=01;31:*.alz=01;31:*.ace=01;31:*.zoo=01;31:*.cpio=01;31:*.7z=01;31:*.rz=01;31:*.cab=01;31:*.wim=01;31:*.swm=01;31:*.dwm=01;31:*.esd=01;31:*.avif=01;35:*.jpg=01;35:*.jpeg=01;35:*.mjpg=01;35:*.mjpeg=01;35:*.gif=01;35:*.bmp=01;35:*.pbm=01;35:*.pgm=01;35:*.ppm=01;35:*.tga=01;35:*.xbm=01;35:*.xpm=01;35:*.tif=01;35:*.tiff=01;35:*.png=01;35:*.svg=01;35:*.svgz=01;35:*.mng=01;35:*.pcx=01;35:*.mov=01;35:*.mpg=01;35:*.mpeg=01;35:*.m2v=01;35:*.mkv=01;35:*.webm=01;35:*.webp=01;35:*.ogm=01;35:*.mp4=01;35:*.m4v=01;35:*.mp4v=01;35:*.vob=01;35:*.qt=01;35:*.nuv=01;35:*.wmv=01;35:*.asf=01;35:*.rm=01;35:*.rmvb=01;35:*.flc=01;35:*.avi=01;35:*.fli=01;35:*.flv=01;35:*.gl=01;35:*.dl=01;35:*.xcf=01;35:*.xwd=01;35:*.yuv=01;35:*.cgm=01;35:*.emf=01;35:*.ogv=01;35:*.ogx=01;35:*.aac=00;36:*.au=00;36:*.flac=00;36:*.m4a=00;36:*.mid=00;36:*.midi=00;36:*.mka=00;36:*.mp3=00;36:*.mpc=00;36:*.ogg=00;36:*.ra=00;36:*.wav=00;36:*.oga=00;36:*.opus=00;36:*.spx=00;36:*.xspf=00;36:*~=00;90:*#=00;90:*.bak=00;90:*.crdownload=00;90:*.dpkg-dist=00;90:*.dpkg-new=00;90:*.dpkg-old=00;90:*.dpkg-tmp=00;90:*.old=00;90:*.orig=00;90:*.part=00;90:*.rej=00;90:*.rpmnew=00;90:*.rpmorig=00;90:*.rpmsave=00;90:*.swp=00;90:*.tmp=00;90:*.ucf-dist=00;90:*.ucf-new=00;90:*.ucf-old=00;90:', 'VSCODE_GIT_IPC_HANDLE': '/run/user/1000/vscode-git-5ddb752b3a.sock', 'TERM_PROGRAM': 'vscode', 'ROS_DOMAIN_ID': '30', 'AMENT_PREFIX_PATH': '/home/jeen/ros2_ws/install/sllidar_ros2:/home/jeen/ros2_ws/install/robot_controller:/home/jeen/ros2_ws/install/rf2o_laser_odometry:/opt/ros/jazzy', 'SHELL': '/bin/bash', 'LESSCLOSE': '/usr/bin/lesspipe %s %s', 'ROS_AUTOMATIC_DISCOVERY_RANGE': 'SUBNET', 'VSCODE_GIT_ASKPASS_EXTRA_ARGS': '', 'PWD': '/home/jeen/ros2_ws/src/build/robot_controller', 'LC_ALL': 'ko_KR.UTF-8', 'COPILOT_DEBUG_NONCE': 'a0c2e664e23bb476685372c921458c7e', 'SSH_CONNECTION': '10.220.204.248 60930 10.220.204.95 22', 'XDG_DATA_DIRS': '/usr/share/gnome:/usr/local/share:/usr/share:/var/lib/snapd/desktop', 'PYTHONPATH': '/home/jeen/ros2_ws/src/build/robot_controller/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/jeen/ros2_ws/src/install/robot_controller/lib/python3.12/site-packages:/home/jeen/ros2_ws/install/robot_controller/lib/python3.12/site-packages:/opt/ros/jazzy/lib/python3.12/site-packages', 'COLCON': '1', 'CMAKE_PREFIX_PATH': '/home/jeen/ros2_ws/install/sllidar_ros2:/home/jeen/ros2_ws/install/rf2o_laser_odometry:/opt/ros/jazzy/opt/gz_sim_vendor:/opt/ros/jazzy/opt/gz_sensors_vendor:/opt/ros/jazzy/opt/gz_physics_vendor:/opt/ros/jazzy/opt/sdformat_vendor:/opt/ros/jazzy/opt/gz_gui_vendor:/opt/ros/jazzy/opt/gz_transport_vendor:/opt/ros/jazzy/opt/gz_rendering_vendor:/opt/ros/jazzy/opt/gz_plugin_vendor:/opt/ros/jazzy/opt/gz_fuel_tools_vendor:/opt/ros/jazzy/opt/gz_msgs_vendor:/opt/ros/jazzy/opt/gz_common_vendor:/opt/ros/jazzy/opt/gz_math_vendor:/opt/ros/jazzy/opt/gz_utils_vendor:/opt/ros/jazzy/opt/gz_tools_vendor:/opt/ros/jazzy/opt/gz_ogre_next_vendor:/opt/ros/jazzy/opt/gz_dartsim_vendor:/opt/ros/jazzy/opt/gz_cmake_vendor'}, 'shell': False}
+[3.920903] (-) TimerEvent: {}
+[4.021479] (-) TimerEvent: {}
+[4.122047] (-) TimerEvent: {}
+[4.222604] (-) TimerEvent: {}
+[4.323121] (-) TimerEvent: {}
+[4.423670] (-) TimerEvent: {}
+[4.524162] (-) TimerEvent: {}
+[4.624679] (-) TimerEvent: {}
+[4.725193] (-) TimerEvent: {}
+[4.825816] (-) TimerEvent: {}
+[4.926341] (-) TimerEvent: {}
+[5.026903] (-) TimerEvent: {}
+[5.127400] (-) TimerEvent: {}
+[5.169972] (robot_controller) StdoutLine: {'line': b'running egg_info\n'}
+[5.227557] (-) TimerEvent: {}
+[5.265488] (robot_controller) StdoutLine: {'line': b'writing ../build/robot_controller/robot_controller.egg-info/PKG-INFO\n'}
+[5.266693] (robot_controller) StdoutLine: {'line': b'writing dependency_links to ../build/robot_controller/robot_controller.egg-info/dependency_links.txt\n'}
+[5.274404] (robot_controller) StdoutLine: {'line': b'writing entry points to ../build/robot_controller/robot_controller.egg-info/entry_points.txt\n'}
+[5.275413] (robot_controller) StdoutLine: {'line': b'writing requirements to ../build/robot_controller/robot_controller.egg-info/requires.txt\n'}
+[5.276423] (robot_controller) StdoutLine: {'line': b'writing top-level names to ../build/robot_controller/robot_controller.egg-info/top_level.txt\n'}
+[5.327732] (-) TimerEvent: {}
+[5.428272] (-) TimerEvent: {}
+[5.496195] (robot_controller) StdoutLine: {'line': b"reading manifest file '../build/robot_controller/robot_controller.egg-info/SOURCES.txt'\n"}
+[5.500362] (robot_controller) StdoutLine: {'line': b"writing manifest file '../build/robot_controller/robot_controller.egg-info/SOURCES.txt'\n"}
+[5.501408] (robot_controller) StdoutLine: {'line': b'running build\n'}
+[5.503822] (robot_controller) StdoutLine: {'line': b'running build_py\n'}
+[5.506837] (robot_controller) StdoutLine: {'line': b'running install\n'}
+[5.528506] (-) TimerEvent: {}
+[5.531725] (robot_controller) StdoutLine: {'line': b'running install_lib\n'}
+[5.628682] (-) TimerEvent: {}
+[5.645805] (robot_controller) StdoutLine: {'line': b'running install_data\n'}
+[5.647007] (robot_controller) StdoutLine: {'line': b'copying config/nav2_params.yaml -> /home/jeen/ros2_ws/src/install/robot_controller/share/robot_controller/config\n'}
+[5.648728] (robot_controller) StdoutLine: {'line': b'running install_egg_info\n'}
+[5.728841] (-) TimerEvent: {}
+[5.751972] (robot_controller) StdoutLine: {'line': b"removing '/home/jeen/ros2_ws/src/install/robot_controller/lib/python3.12/site-packages/robot_controller-0.1.0-py3.12.egg-info' (and everything under it)\n"}
+[5.753800] (robot_controller) StdoutLine: {'line': b'Copying ../build/robot_controller/robot_controller.egg-info to /home/jeen/ros2_ws/src/install/robot_controller/lib/python3.12/site-packages/robot_controller-0.1.0-py3.12.egg-info\n'}
+[5.759938] (robot_controller) StdoutLine: {'line': b'running install_scripts\n'}
+[5.828997] (-) TimerEvent: {}
+[5.929504] (-) TimerEvent: {}
+[6.030070] (-) TimerEvent: {}
+[6.130620] (-) TimerEvent: {}
+[6.231139] (-) TimerEvent: {}
+[6.331703] (-) TimerEvent: {}
+[6.432234] (-) TimerEvent: {}
+[6.474799] (robot_controller) StdoutLine: {'line': b'Installing avoidance_node script to /home/jeen/ros2_ws/src/install/robot_controller/lib/robot_controller\n'}
+[6.475812] (robot_controller) StdoutLine: {'line': b'Installing keyboard_node script to /home/jeen/ros2_ws/src/install/robot_controller/lib/robot_controller\n'}
+[6.483172] (robot_controller) StdoutLine: {'line': b'Installing lidar_node script to /home/jeen/ros2_ws/src/install/robot_controller/lib/robot_controller\n'}
+[6.484798] (robot_controller) StdoutLine: {'line': b'Installing motor_node script to /home/jeen/ros2_ws/src/install/robot_controller/lib/robot_controller\n'}
+[6.486282] (robot_controller) StdoutLine: {'line': b'Installing mpu6050_node script to /home/jeen/ros2_ws/src/install/robot_controller/lib/robot_controller\n'}
+[6.489105] (robot_controller) StdoutLine: {'line': b"writing list of installed files to '/home/jeen/ros2_ws/src/build/robot_controller/install.log'\n"}
+[6.532641] (-) TimerEvent: {}
+[6.633475] (-) TimerEvent: {}
+[6.640750] (robot_controller) CommandEnded: {'returncode': 0}
+[6.694193] (robot_controller) JobEnded: {'identifier': 'robot_controller', 'rc': 0}
+[6.696920] (-) EventReactorShutdown: {}
