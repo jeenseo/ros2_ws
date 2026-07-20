@@ -73,7 +73,7 @@ ALPHA = 0.98
 #   ANGULAR_VEL_COV  1e-5: 유지 → Wz 회전속도는 IMU가 1차 소스
 ORIENTATION_COV     = 1e-4   # Yaw orientation: IMU 주, LiDAR 보조 허용
 ANGULAR_VEL_COV     = 1e-5   # Wz 각속도: IMU 고신뢰 유지
-LINEAR_ACCEL_COV    = 1e-3
+LINEAR_ACCEL_COV    = 1e-3   # Ax, Ay, Az: IMU 가속도계 노이즈 허용
 
 
 class MPU6050Node(Node):

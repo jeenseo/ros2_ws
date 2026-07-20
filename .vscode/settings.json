@@ -9,5 +9,6 @@
         "/home/jeen/ros2_ws/build/robot_controller",
         "/home/jeen/ros2_ws/install/robot_controller/lib/python3.12/site-packages",
         "/opt/ros/jazzy/lib/python3.12/site-packages"
-    ]
+    ],
+    "cmake.sourceDirectory": "C:/Users/tjwld/ros2_ws/src/rf2o_laser_odometry"
 }
