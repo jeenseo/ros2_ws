@@ -53,7 +53,7 @@ def generate_launch_description():
 
     # 파일 경로
     nav2_params_file = os.path.join(pkg_dir, 'config', 'nav2_params.yaml')
-    map_yaml_file    = os.path.join(pkg_dir, 'maps',   'map.yaml')
+    map_yaml_file    = os.path.join(pkg_dir, 'maps', 'capstone_map.yaml')
     ekf_yaml_file    = os.path.join(pkg_dir, 'config', 'ekf.yaml')
     urdf_file        = os.path.join(pkg_dir, 'urdf',   'robot.urdf')
 

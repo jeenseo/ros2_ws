@@ -154,6 +154,7 @@ controller_server:
         critical_distance: 0.35
         collision_cost:   100000.0
         near_goal_distance: 0.5
+        robot_radius: 0.01
 
       PathFollowCritic:
         plugin: "mppi::PathFollowCritic"
