@@ -8,7 +8,8 @@ ROS 2 Node: 터미널 키보드 제어 — 메카넘/스키드-스티어 공용 
   S / ↓  : 후진  → linear.x  = -spd
   A / ←  : 좌회전 → angular.z = +spd (CCW, ROS 2 표준)
   D / →  : 우회전 → angular.z = -spd (CW)
-  linear.y = 항상 0.0 고정 (스트레이핑 비활성화)
+  Q      : 좌측 게걸음 → linear.y = +spd
+  E      : 우측 게걸음 → linear.y = -spd
 
 [특징]
   - W/S는 linear.x만 제어 (angular.z 독립)
@@ -76,7 +77,7 @@ class KeyboardNode(Node):
         self.get_logger().info(
             'KeyboardNode 준비 완료\n'
             '  W/↑=전진  S/↓=후진  A/←=좌회전  D/→=우회전\n'
-            '  linear.y = 0.0 고정 (스트레이핑 비활성화)\n'
+            '  Q=좌측 게걸음  E=우측 게걸음\n'
             '  m=MANUAL↔AUTO  b=Normal↔Boost  Ctrl+C=종료'
         )
         self._publish_mode()
@@ -179,6 +180,10 @@ class KeyboardNode(Node):
                         current_frame.add('A')   # angular.z +
                     elif ch in ('d', 'D'):
                         current_frame.add('D')   # angular.z -
+                    elif ch in ('q', 'Q'):
+                        current_frame.add('Q')   # linear.y + (좌측 스트레이프)
+                    elif ch in ('e', 'E'):
+                        current_frame.add('E')   # linear.y - (우측 스트레이프)
 
                 with self._key_lock:
                     self._keys = current_frame
@@ -191,13 +196,6 @@ class KeyboardNode(Node):
     def _publish_cmd(self) -> None:
         """
         MANUAL 모드에서 20Hz로 /cmd_vel_keyboard 게시.
-
-        축 매핑 (ROS 2 표준):
-          W/S → msg.linear.x   (전진/후진)
-          A/D → msg.angular.z  (좌/우 회전, CCW=+)
-          msg.linear.y = 0.0   (스트레이핑 항상 0)
-
-        키 미입력 시 Twist(0,0,0) 게시 → motor_node → CAN(0,0,0,0) → 모터 정지
         """
         if self._mode != 'MANUAL':
             return
@@ -214,6 +212,13 @@ class KeyboardNode(Node):
         if 'S' in keys:
             linear_x -= spd
 
+        # ── Q/E → linear.y (좌/우 스트레이프) ─────────────────────
+        linear_y = 0.0
+        if 'Q' in keys:
+            linear_y += spd
+        if 'E' in keys:
+            linear_y -= spd
+
         # ── A/D → angular.z (좌/우 회전) ─────────────────────────
         angular_z = 0.0
         if 'A' in keys:
@@ -224,7 +229,7 @@ class KeyboardNode(Node):
         # ── Twist 메시지 구성 ─────────────────────────────────────
         msg = Twist()
         msg.linear.x  = max(-1.0, min(1.0, linear_x))
-        msg.linear.y  = 0.0   # 스트레이핑 완전 비활성화 (메카넘 Vy=0)
+        msg.linear.y  = max(-1.0, min(1.0, linear_y))
         msg.linear.z  = 0.0
         msg.angular.x = 0.0
         msg.angular.y = 0.0
