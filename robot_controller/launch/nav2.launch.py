@@ -110,7 +110,7 @@ def generate_launch_description():
         parameters=[{
             'i2c_bus':     1,
             'i2c_address': 0x68,
-            'publish_hz':  20.0,
+            'publish_hz':  30.0,
             'frame_id':    'imu_link',
             'alpha':       0.98,
         }],
@@ -134,6 +134,21 @@ def generate_launch_description():
         }],
         # Nav2의 /cmd_vel 출력을 /cmd_vel_nav2로 수신
         remappings=[('/cmd_vel_nav2', '/cmd_vel')],
+    )
+    # ─────────────────────────────────────────────────────────────
+    # ── 카메라: camera_ros ───────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────
+    camera_node = Node(
+        package='camera_ros',
+        executable='camera_node',
+        name='camera_node',
+        output='screen',
+        parameters=[{
+            'format': 'RGB888',  # 투명도 채널 제거 (화면 까맣게 나오는 현상 방지)
+            'width': 640,
+            'height': 480,
+            'fps': 10.0,           # [핵심] 네트워크 과부하 및 VSCode 뻗음 방지용 15프레임 제한
+        }],
     )
 
     # ─────────────────────────────────────────────────────────────
@@ -236,6 +251,7 @@ def generate_launch_description():
         lidar_node,
         mpu6050_node,
         motor_node,
+        camera_node,    
 
         # 오도메트리 + EKF 융합
         rf2o_node,

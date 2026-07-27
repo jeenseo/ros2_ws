@@ -1,0 +1,18 @@
+apriltag_node:
+  ros__parameters:
+    # 기본 설정
+    image_transport: "raw"
+    family: "36h11"
+    size: 0.08  # 기본 태그 크기 8cm (0.08m)
+
+    # 개별 태그 족보 등록 (아까 인쇄한 ID 0번, 1번...)
+    tags:
+      - id: 0
+        size: 0.08
+        name: "target_dock_0"  # 예: 0번 태그는 첫 번째 배달 목적지
+      - id: 1
+        size: 0.08
+        name: "target_dock_1"  # 예: 1번 태그는 두 번째 배달 목적지
+      - id: 2
+        size: 0.08
+        name: "home_station"   # 예: 2번 태그는 복귀할 충전소
