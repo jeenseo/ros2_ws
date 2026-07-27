@@ -132,13 +132,14 @@ controller_server:
       gamma:           0.015
 
       # ── 속도 한계 ─────────────────────────────────────────────
-      vx_max:    0.22
+      vx_max:    0.5
       vx_min:   -0.10
-      vy_max:    0.0
-      vy_min:    0.0
+      vy_max:    0.5
+      vy_min:   -0.5
       wz_max:    0.50    # MPPI는 ω를 DWB보다 효과적으로 활용
       # 샘플 표준편차 (탐색 범위 제어)
       vx_std:    0.15
+      vy_std:    0.15
       wz_std:    0.30
 
       # ── 최소 속도 (2단계 피드포워드와 호환) ──────────────────
@@ -358,11 +359,16 @@ velocity_smoother:
     smoothing_frequency:  20.0
     scale_velocities:     False
     feedback:             "OPEN_LOOP"
-    # 🚀 [수정 완료] DWB의 가감속 제한과 동일하게 맞춰서 스무더가 방해하지 못하게 함
-    max_velocity:         [0.30, 0.0, 0.3]    # 세 번째 0.4 -> 0.3
-    min_velocity:         [-0.30, 0.0, -0.3]  # 세 번째 -0.4 -> -0.3
-    max_accel:            [0.30, 0.0, 0.2]    # 세 번째 0.4 -> 0.2
-    max_decel:            [-0.20, 0.0, -0.2]  # 세 번째 -0.4 -> -0.2
+    # [x, y, yaw] 순서입니다.
+    # MPPI 속도를 0.5로 올렸으므로, 스무더의 허용량도 0.5로 열어주어야 속도가 잘리지 않습니다.
+    max_velocity:         [0.50, 0.50, 0.5]   
+    
+    # vy_min을 -0.20으로 쓰실 거라면 가운데를 -0.20으로, -0.50으로 고치실 거라면 -0.50으로 맞춥니다.
+    min_velocity:         [-0.10, -0.50, -0.5] 
+    
+    # 가속도는 0.5m/s까지 도달하는 데 걸리는 힘입니다. 0.3~0.5 사이가 적당합니다.
+    max_accel:            [0.40, 0.40, 0.3]   
+    max_decel:            [-0.40, -0.40, -0.3]
     odom_topic:           "odom"
     odom_duration:        0.1
     deadband_velocity:    [0.0, 0.0, 0.0]

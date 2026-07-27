@@ -99,11 +99,11 @@ ekf_node:
     odom1: /odom_motor
 
 # [x, y, z, roll, pitch, yaw, vx, vy, vz, vroll, vpitch, vyaw, ax, ay, az]
-    # [수정] 바퀴의 절대 위치(X, Y, Yaw)는 라이다와 충돌하므로 모조리 false로 끕니다!
-    # 오직 치고 나가는 전진 속도(Vx)와 회전 속도(Vyaw)만 true로 살려둡니다.
+  # [수정] 바퀴의 절대 위치(X, Y, Yaw)는 라이다와 충돌하므로 모조리 false로 끕니다!
+    # 전진 속도(Vx)와 게걸음 속도(Vy)를 true로 살려둡니다.
     odom1_config: [false, false, false,
                    false, false, false,
-                   true,  false, false,   # Vx 활성화 (전진 속도 2차 소스)
+                   true,  true,  false,   # [변경] Vx, Vy 활성화 (Y축 명령 기반 추정치 수용)
                    false, false, false,   
                    false, false, false]
 

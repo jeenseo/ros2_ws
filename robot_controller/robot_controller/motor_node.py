@@ -85,9 +85,6 @@ _METER_PER_TICK    = _WHEEL_CIRCUM_M / _ENCODER_CPR    # ≈ 0.0002685 m/tick
 _MECANUM_L         = (_TRACK_WIDTH_M + _WHEELBASE_M) / 2.0   # 0.505 m
 
 # 속도 한계 (CAN 정규화 기준)
-_MAX_VX            = 0.22   # m/s (최대 직진)
-_MAX_VY            = 0.22   # m/s (최대 스트레이프)
-_MAX_WZ            = 0.50   # rad/s (최대 회전)
 _MAX_SPEED         = 9999   # CAN 최대값
 
 # CAN ID
@@ -108,12 +105,22 @@ class MotorNode(Node):
         self.declare_parameter('base_frame',  'base_footprint')
         self.declare_parameter('odom_topic',  '/odom_motor')
 
+        # [하드웨어 스펙] 모터가 9999(100%) 출력일 때 나오는 로봇의 물리적 최대 속도
+        # Nav2의 m/s 명령을 0~9999 스케일로 번역하는 역할을 수행합니다.
+        self.declare_parameter('hw_max_vx', 0.95)  # m/s
+        self.declare_parameter('hw_max_vy', 0.95)  # m/s
+        self.declare_parameter('hw_max_wz', 1.88)  # rad/s (0.95 / 0.505)
+
         channel          = self.get_parameter('can_channel').value
         self._can_id     = self.get_parameter('can_id').value
         self._max_speed  = self.get_parameter('max_speed').value
         self._odom_frame = self.get_parameter('odom_frame').value
         self._base_frame = self.get_parameter('base_frame').value
         odom_topic       = self.get_parameter('odom_topic').value
+
+        self._hw_max_vx  = self.get_parameter('hw_max_vx').value
+        self._hw_max_vy  = self.get_parameter('hw_max_vy').value
+        self._hw_max_wz  = self.get_parameter('hw_max_wz').value
 
         # ── 모드 / E-Stop ─────────────────────────────────────────
         self._mode        = 'MANUAL'
@@ -309,13 +316,13 @@ class MotorNode(Node):
           FL/RL: 정상 결선 (양수=전진)
           FR/RR: 역결선 보정 → CAN 음수 부호 적용 (motor.h DIR_INVERT 설정에 따라 조정)
         """
-        # 입력 속도를 최대값으로 정규화
-        Vx = msg.linear.x  / _MAX_VX
-        Vy = msg.linear.y  / _MAX_VY
-        Wz = msg.angular.z / _MAX_WZ
+        # 입력 속도를 하드웨어 최대 물리 속도(0.95m/s) 스케일로 번역
+        Vx = msg.linear.x  / self._hw_max_vx
+        Vy = msg.linear.y  / self._hw_max_vy
+        Wz = msg.angular.z / self._hw_max_wz
 
-        # 메카넘 IK (정규화 공간, l도 정규화)
-        l_norm = _MECANUM_L / _MAX_VX   # l을 Vx 기준으로 정규화
+        # 메카넘 IK 거리 상수 (하드웨어 스펙 기준으로 정규화)
+        l_norm = _MECANUM_L / self._hw_max_vx
 
         v_fl = Vx - Vy - Wz * l_norm
         v_fr = Vx + Vy + Wz * l_norm
