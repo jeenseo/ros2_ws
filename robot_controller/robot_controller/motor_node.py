@@ -85,8 +85,10 @@ class MotorNode(Node):
         self._vel_yaw        = 0.0   
         self._last_fb_time   = None  # 타입 힌팅 에러 방지
 
-        # 마지막 Vy 명령값 (하이브리드 오도메트리용)
+        # 마지막 명령값 (동적 공분산 및 하이브리드 오도메트리용)
+        self._cmd_vx     = 0.0       
         self._cmd_vy     = 0.0       
+        self._cmd_wz     = 0.0       
         self._cmd_lock   = threading.Lock()
 
         # ── CAN 버스 ──────────────────────────────────────────────
@@ -168,7 +170,7 @@ class MotorNode(Node):
             self.get_logger().error(f'[🚨 긴급] CAN RX 스레드 암살됨! 원인: {repr(e)}')
 
     # ══════════════════════════════════════════════════════════════
-    # 오도메트리 게시
+    # 오도메트리 게시 (적응형 동적 공분산 적용)
     # ══════════════════════════════════════════════════════════════
 
     @staticmethod
@@ -196,17 +198,26 @@ class MotorNode(Node):
         odom.twist.twist.linear.y  = vy
         odom.twist.twist.angular.z = wz
 
-        # 🚀 [에러 방어] 리스트를 통째로 할당하여 Tuple 할당 에러(TypeError) 원천 차단
+        # 🚀 [동적 공분산(Dynamic Covariance) 알고리즘]
+        # 1. 휠 슬립(Slip) 감지
+        with self._cmd_lock:
+            cmd_vx = self._cmd_vx
+            cmd_wz = self._cmd_wz
+            
+        slip_error_x = abs(cmd_vx - vx)
+        slip_error_yaw = abs(cmd_wz - wz)
+
+        # 2. 오차 비례 가중치 팽창 로직
         cov_pose = [0.0] * 36
-        cov_pose[0]  = 0.05   
-        cov_pose[7]  = 0.20   
-        cov_pose[35] = 0.10   
+        cov_pose[0]  = 0.05 + (slip_error_x * 0.5)      # X (엔코더 기반 동적 변화)
+        cov_pose[7]  = 0.20                             # Y (명령 적분, 고정 낮음)
+        cov_pose[35] = 0.10 + (slip_error_yaw * 0.5)    # Yaw (엔코더 기반 동적 변화)
         odom.pose.covariance = cov_pose
 
         cov_twist = [0.0] * 36
-        cov_twist[0]  = 0.01
-        cov_twist[7]  = 0.05
-        cov_twist[35] = 0.05
+        cov_twist[0]  = 0.01 + (slip_error_x * 0.1)     # Vx (선속도)
+        cov_twist[7]  = 0.05                            # Vy
+        cov_twist[35] = 0.05 + (slip_error_yaw * 0.1)   # Wz (각속도)
         odom.twist.covariance = cov_twist
 
         self._pub_odom.publish(odom)
@@ -239,7 +250,9 @@ class MotorNode(Node):
         rr_can = int(max(-N, min(N,  v_rr * N)))
 
         with self._cmd_lock:
+            self._cmd_vx = msg.linear.x
             self._cmd_vy = msg.linear.y
+            self._cmd_wz = msg.angular.z
 
         self._send_can(fl_can, fr_can, rl_can, rr_can)
 
@@ -254,7 +267,9 @@ class MotorNode(Node):
             self.get_logger().info(f'[MODE] {old} → {msg.data}')
             self._send_can(0, 0, 0, 0)
             with self._cmd_lock:
+                self._cmd_vx = 0.0
                 self._cmd_vy = 0.0
+                self._cmd_wz = 0.0
 
     def _estop_cb(self, msg: Bool) -> None:
         with self._estop_lock:
@@ -263,7 +278,9 @@ class MotorNode(Node):
             self.get_logger().warn('[E-STOP] 발동!')
             self._send_can(0, 0, 0, 0)
             with self._cmd_lock:
+                self._cmd_vx = 0.0
                 self._cmd_vy = 0.0
+                self._cmd_wz = 0.0
             ack = Bool(); ack.data = True
             self._pub_estop_ack.publish(ack)
         elif not msg.data and prev:
