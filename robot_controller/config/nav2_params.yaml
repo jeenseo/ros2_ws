@@ -3,28 +3,13 @@
 # ROS 2 Nav2 파라미터 — 자율 장애물 회피 로봇
 #
 # 로봇 특성:
-#   구동: 스키드-스티어 (비홀로노믹, 전/후진+회전)
+#   구동: 메카넘 (Omni, 전방위 이동)
 #   LiDAR: RPLIDAR A1  /scan  (frame: lidar_link)
 #   오도메트리: rf2o_laser_odometry (스캔 매칭, 엔코더 없음)
 #   맵: maps/map.yaml (사전 빌드된 정적 맵)
 #
-# 비대칭 Footprint (base_link = LiDAR 위치 기준, 단위 m):
-#   전방: +0.265 m,  좌측: +0.370 m
-#   우측: -0.375 m,  후방: -0.570 m
-#
 # TF 트리: map → odom → base_footprint → base_link → lidar_link
-#
-# 수정 이력:
-#   - global_costmap.global_frame: odom → map
-#   - robot_base_frame: base_link → base_footprint (전체)
-#   - amcl 섹션 추가
-#   - collision_monitor 제거 (파라미터 없음 → lifecycle abort 방지)
-#   - global_costmap rolling_window 제거, static_layer 활성화
-#   - 관측 소스 frame: lidar_link
 
-# ─────────────────────────────────────────────────────────────────────────
-# AMCL (Monte Carlo Localization — 맵 기반 위치 추정)
-# ─────────────────────────────────────────────────────────────────────────
 amcl:
   ros__parameters:
     use_sim_time:         false
@@ -73,7 +58,6 @@ amcl:
       z:     0.0
       yaw:   0.0
 
-# ─────────────────────────────────────────────────────────────────────────
 bt_navigator:
   ros__parameters:
     use_sim_time: false
@@ -91,11 +75,10 @@ bt_navigator:
       - compute_path_error_code
       - follow_path_error_code
 
-# ─────────────────────────────────────────────────────────────────────────
 controller_server:
   ros__parameters:
     use_sim_time:                 false
-    controller_frequency:         10.0
+    controller_frequency:         20.0
     min_x_velocity_threshold:     0.001
     min_y_velocity_threshold:     0.5
     min_theta_velocity_threshold: 0.001
@@ -112,50 +95,41 @@ controller_server:
     general_goal_checker:
       stateful:        True
       plugin:          "nav2_controller::SimpleGoalChecker"
-      # 🚀 [신의 한 수] 관성 안착 (Latch) 세팅 적용
-      xy_goal_tolerance:  0.15           # 0.3 -> 0.15 (골프 홀컵 15cm 반경)
-      yaw_goal_tolerance: 0.10           # 0.5 -> 0.10 (회전 허용치 넉넉하게)
-      latch_xy_goal_tolerance: true      # 반경 진입 시 즉시 모터 끄고 관성으로 스르륵 안착!
+      xy_goal_tolerance:  0.15           
+      yaw_goal_tolerance: 0.10           
+      latch_xy_goal_tolerance: true      
 
     FollowPath:
-      # [DWB → MPPI 전환]
-      # DWB는 "fast linear, slow angular" 제약에서 구조적으로 late swerve 발생
-      # MPPI: 병렬 몬테카를로 샘플링 → 더 넓은 회피 공간, 동적 장애물에 강함
       plugin: "nav2_mppi_controller::MPPIController"
-
-      # ── 시간/샘플 설정 ────────────────────────────────────────
-      time_steps:      56       # 56 × 0.05 = 2.8초 예측 지평선
-      model_dt:        0.1     # 50ms 단위 롤아웃
-      batch_size:      2000     # 병렬 궤적 수 (Pi5 CPU에서 적정값)
+      time_steps: 60       
+      model_dt: 0.05       
+      batch_size:      2000     
       iteration_count: 1
-      temperature:     0.3      # 낮을수록 최적 궤적 집중
+      temperature:     0.3      
       gamma:           0.015
 
-      # ── 속도 한계 ─────────────────────────────────────────────
-      vx_max:    0.5
-      vx_min:   -0.10
-      vy_max:    0.5
-      vy_min:   -0.5
-      wz_max:    0.50    # MPPI는 ω를 DWB보다 효과적으로 활용
-      # 샘플 표준편차 (탐색 범위 제어)
-      vx_std:    0.15
-      vy_std:    0.15
-      wz_std:    0.30
+      vx_max: 0.30
+      vx_min: -0.30        
+      vy_max: 0.20         
+      vy_min: -0.20        
+      wz_max: 0.50 
+      
+      vx_std: 0.20         
+      vy_std: 0.20         
+      wz_std: 0.30
+      
+      motion_model: "Omni" 
 
-      # ── 최소 속도 (2단계 피드포워드와 호환) ──────────────────
-      motion_model: "DiffDrive"
-
-      # ── Critics (장애물 회피 우선) ────────────────────────────
       critics: ["ObstaclesCritic", "PathFollowCritic", "PathAngleCritic", "GoalCritic", "GoalAngleCritic", "PreferForwardCritic", "TwirlingCritic"]
       
       ObstaclesCritic:
         plugin: "mppi::ObstaclesCritic"
         critical_weight:  200.0
         repulsion_weight: 2.0
-        critical_distance: 0.35
+        critical_distance: 0.40
         collision_cost:   100000.0
         near_goal_distance: 0.5
-        robot_radius: 0.01
+        robot_radius: 0.38
 
       PathFollowCritic:
         plugin: "mppi::PathFollowCritic"
@@ -178,13 +152,12 @@ controller_server:
 
       PreferForwardCritic:
         plugin: "mppi::PreferForwardCritic"
-        penalty_weight: 3.0
+        penalty_weight: 0.5
 
       TwirlingCritic:
         plugin: "mppi::TwirlingCritic"
         twirling_cost_weight: 10.0
 
-# ─────────────────────────────────────────────────────────────────────────
 local_costmap: 
   local_costmap:
     ros__parameters:
@@ -197,15 +170,14 @@ local_costmap:
       rolling_window:     true
       width:              5
       height:             5
-      resolution:         0.1 # 
+      resolution:         0.1 
       footprint: "[[0.25, 0.28], [0.25, -0.28], [-0.25, -0.28], [-0.25, 0.28]]"
       footprint_padding: 0.0     
       plugins: ["obstacle_layer", "inflation_layer"]
       
       inflation_layer:
         plugin:              "nav2_costmap_2d::InflationLayer"
-        # [수정] 장애물 조기 감지: radius 0.45→0.55, scaling 5.0→2.5 (완만한 비용 감쇠)
-        cost_scaling_factor: 2.5
+        cost_scaling_factor: 8.0
         inflation_radius:    0.55
         
       obstacle_layer:
@@ -229,23 +201,18 @@ local_costmap:
       
       always_send_full_costmap: True
 
-# ─────────────────────────────────────────────────────────────────────────
 global_costmap: 
   global_costmap:
     ros__parameters:
       use_sim_time:        false
       update_frequency:    0.1
       publish_frequency:   0.1
-      
       global_frame:        map           
       robot_base_frame:    base_footprint
       transform_tolerance: 1.0           
-      
       resolution:          0.05
-      
       footprint: "[[0.25, 0.28], [0.25, -0.28], [-0.25, -0.28], [-0.25, 0.28]]"
       footprint_padding:   0.0
-      
       plugins: ["static_layer", "obstacle_layer", "inflation_layer"]
       
       static_layer:
@@ -274,10 +241,8 @@ global_costmap:
         plugin:              "nav2_costmap_2d::InflationLayer"
         cost_scaling_factor: 5.0
         inflation_radius:    0.45
-        #
       always_send_full_costmap: False
 
-# ─────────────────────────────────────────────────────────────────────────
 map_server:
   ros__parameters:
     use_sim_time:  false
@@ -291,7 +256,6 @@ map_saver:
     occupied_thresh_default:   0.65
     map_subscribe_transient_local: True
 
-# ─────────────────────────────────────────────────────────────────────────
 planner_server:
   ros__parameters:
     expected_planner_frequency: 20.0
@@ -303,7 +267,6 @@ planner_server:
       use_astar:     false
       allow_unknown: true
 
-# ─────────────────────────────────────────────────────────────────────────
 smoother_server:
   ros__parameters:
     use_sim_time:     false
@@ -314,7 +277,6 @@ smoother_server:
       max_its:        1000
       do_refinement:  True
 
-# ─────────────────────────────────────────────────────────────────────────
 behavior_server:
   ros__parameters:
     costmap_topic:    local_costmap/costmap_raw
@@ -340,7 +302,6 @@ behavior_server:
     min_rotational_vel:     0.1
     rotational_acc_lim:     0.3
 
-# ─────────────────────────────────────────────────────────────────────────
 waypoint_follower:
   ros__parameters:
     use_sim_time:            false
@@ -352,29 +313,21 @@ waypoint_follower:
       enabled:                True
       waypoint_pause_duration: 200
 
-# ─────────────────────────────────────────────────────────────────────────
 velocity_smoother:
   ros__parameters:
     use_sim_time:         false
     smoothing_frequency:  20.0
     scale_velocities:     False
     feedback:             "OPEN_LOOP"
-    # [x, y, yaw] 순서입니다.
-    # MPPI 속도를 0.5로 올렸으므로, 스무더의 허용량도 0.5로 열어주어야 속도가 잘리지 않습니다.
-    max_velocity:         [0.50, 0.50, 0.5]   
-    
-    # vy_min을 -0.20으로 쓰실 거라면 가운데를 -0.20으로, -0.50으로 고치실 거라면 -0.50으로 맞춥니다.
-    min_velocity:         [-0.10, -0.50, -0.5] 
-    
-    # 가속도는 0.5m/s까지 도달하는 데 걸리는 힘입니다. 0.3~0.5 사이가 적당합니다.
-    max_accel:            [0.40, 0.40, 0.3]   
-    max_decel:            [-0.40, -0.40, -0.3]
+    max_velocity:         [0.30, 0.20, 0.3]   
+    min_velocity:         [-0.30, -0.20, -0.3]  
+    max_accel:            [0.30, 0.20, 0.2]   
+    max_decel:            [-0.20, -0.20, -0.2]  
     odom_topic:           "odom"
     odom_duration:        0.1
     deadband_velocity:    [0.0, 0.0, 0.0]
     velocity_timeout:     1.0
 
-# ─────────────────────────────────────────────────────────────────────────
 collision_monitor:
   ros__parameters:
     use_sim_time: false
