@@ -91,7 +91,7 @@ class MotorNode(Node):
         self._cmd_wz     = 0.0       
         self._cmd_lock   = threading.Lock()
 
-        # ── CAN 버스 ──────────────────────────────────────────────
+       # ── CAN 버스 ──────────────────────────────────────────────
         try:
             self._bus = can.interface.Bus(channel=channel, bustype='socketcan')
             self.get_logger().info(
@@ -100,8 +100,6 @@ class MotorNode(Node):
         except Exception as exc:
             self.get_logger().fatal(f'CAN 초기화 실패: {exc}')
             raise
-
-        self._notifier = can.Notifier(self._bus, [self._can_rx_callback])
 
         # ── ROS 구독/게시 ─────────────────────────────────────────
         self._sub_keyboard = self.create_subscription(Twist, '/cmd_vel_keyboard', self._keyboard_cb, _CMD_VEL_QOS)
@@ -112,6 +110,9 @@ class MotorNode(Node):
         self._pub_odom     = self.create_publisher(Odometry, odom_topic, 10)
 
         self.get_logger().info(f'MotorNode (Mecanum) 준비 완료. Odom -> {odom_topic}')
+
+        # 🚀 [Race Condition 완벽 방어] 모든 준비가 끝난 후 맨 마지막에 CAN 수신 스레드 가동!
+        self._notifier = can.Notifier(self._bus, [self._can_rx_callback])
 
     # ══════════════════════════════════════════════════════════════
     # CAN RX: STM32 엔코더 피드백 + 하이브리드 오도메트리
@@ -207,17 +208,17 @@ class MotorNode(Node):
         slip_error_x = abs(cmd_vx - vx)
         slip_error_yaw = abs(cmd_wz - wz)
 
-        # 2. 오차 비례 가중치 팽창 로직
-        cov_pose = [0.0] * 36
-        cov_pose[0]  = 0.05 + (slip_error_x * 0.5)      # X (엔코더 기반 동적 변화)
-        cov_pose[7]  = 0.20                             # Y (명령 적분, 고정 낮음)
-        cov_pose[35] = 0.10 + (slip_error_yaw * 0.5)    # Yaw (엔코더 기반 동적 변화)
-        odom.pose.covariance = cov_pose
+        # 2. 오차 비례 가중치 팽창 및 스무딩 로직
+        cov_pose = [0.0] * 36  # ⬅️ [복구됨] 36칸짜리 빈 배열 생성
+        cov_pose[0]  = min(0.5, 0.05 + (slip_error_x * 0.2))      
+        cov_pose[7]  = 0.20                             
+        cov_pose[35] = min(0.5, 0.10 + (slip_error_yaw * 0.2))    
+        odom.pose.covariance = cov_pose  # ⬅️ [복구됨] odom 메시지에 장착
 
         cov_twist = [0.0] * 36
-        cov_twist[0]  = 0.01 + (slip_error_x * 0.1)     # Vx (선속도)
-        cov_twist[7]  = 0.05                            # Vy
-        cov_twist[35] = 0.05 + (slip_error_yaw * 0.1)   # Wz (각속도)
+        cov_twist[0]  = min(0.1, 0.01 + (slip_error_x * 0.05))
+        cov_twist[7]  = 0.05
+        cov_twist[35] = min(0.1, 0.05 + (slip_error_yaw * 0.05))
         odom.twist.covariance = cov_twist
 
         self._pub_odom.publish(odom)
