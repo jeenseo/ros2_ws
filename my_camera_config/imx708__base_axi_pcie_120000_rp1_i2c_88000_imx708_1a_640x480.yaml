@@ -1,0 +1,28 @@
+image_width: 640
+image_height: 480
+camera_name: imx708__base_axi_pcie_120000_rp1_i2c_88000_imx708_1a_640x480
+camera_matrix:
+  rows: 3
+  cols: 3
+  data: [956.2766725313594, 0, 430.44467118164818, 0, 952.57413562449165, 252.04788974748439, 0, 0, 1]
+distortion_model: plumb_bob
+distortion_coefficients:
+  rows: 1
+  cols: 5
+  data: [0.0013286186368257954, 0.13828044329033951, 0.0027007620067128076, 0.002116109173303969, 0]
+rectification_matrix:
+  rows: 3
+  cols: 3
+  data: [1, 0, 0, 0, 1, 0, 0, 0, 1]
+projection_matrix:
+  rows: 3
+  cols: 4
+  data: [961.1466064453125, 0, 429.39658617077657, 0, 0, 958.0101318359375, 252.39247698307736, 0, 0, 0, 1, 0]
+binning_x: 0
+binning_y: 0
+roi:
+  x_offset: 0
+  y_offset: 0
+  height: 0
+  width: 0
+  do_rectify: false
