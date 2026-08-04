@@ -136,7 +136,7 @@ def generate_launch_description():
         remappings=[('/cmd_vel_nav2', '/cmd_vel')],
     )
     # ─────────────────────────────────────────────────────────────
-    # ── 카메라: camera_ros ───────────────────────────────────────
+    # ── 카메라: camera_ros (터미널 수동 실행 명령어 완벽 이식) ─────
     # ─────────────────────────────────────────────────────────────
     camera_node = Node(
         package='camera_ros',
@@ -144,10 +144,12 @@ def generate_launch_description():
         name='camera_node',
         output='screen',
         parameters=[{
-            'format': 'RGB888',  # 투명도 채널 제거 (화면 까맣게 나오는 현상 방지)
             'width': 640,
             'height': 480,
-            'fps': 10.0,           # [핵심] 네트워크 과부하 및 VSCode 뻗음 방지용 15프레임 제한
+            'format': 'RGB888',
+            'AfMode': 0,          # 오토포커스 끄기
+            'LensPosition': 2.0,  # 수동 초점 거리 고정 50cm, 0.5로 설정시(2.0m)
+            'fps': 10.0,          # 라즈베리파이 부하 방지용 10프레임 고정
         }],
     )
 

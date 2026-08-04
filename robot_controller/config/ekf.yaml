@@ -113,6 +113,25 @@ ekf_node:
     odom1_relative:       false
 
     # ─────────────────────────────────────────────────────────────
+    # pose0: 카메라(AprilTag) 비전 오도메트리 (/vision_pose)
+    # 태그를 발견했을 때만 발행되는 맵(map) 기준 절대 위치 데이터
+    # ─────────────────────────────────────────────────────────────
+    pose0: /vision_pose
+
+    # 상태 벡터 매핑: [x, y, z, roll, pitch, yaw, vx, vy, vz, vroll, vpitch, vyaw, ax, ay, az]
+    # 카메라가 계산한 '절대 위치(X, Y)'와 '절대 방향(Yaw)'을 신뢰합니다.
+    pose0_config: [true,  true,  false,
+                   false, false, false,
+                   false, false, false,
+                   false, false, false,
+                   false, false, false]
+
+    pose0_queue_size: 5
+    pose0_nodelay: false
+    pose0_differential: false   # 이전 위치와의 변화량이 아닌 '절대 위치'로 처리
+    pose0_relative: false       # 시작 지점 기준이 아닌 '맵' 기준 절대 좌표 사용
+
+    # ─────────────────────────────────────────────────────────────
     # 프로세스 노이즈 공분산 Q (15×15 대각 행렬)
     # 순서: x, y, z, roll, pitch, yaw, vx, vy, vz,
     #        vroll, vpitch, vyaw, ax, ay, az

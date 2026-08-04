@@ -41,6 +41,7 @@ setup(
             'avoidance_node = robot_controller.avoidance_node:main',
             'keyboard_node  = robot_controller.keyboard_node:main',
             'mpu6050_node   = robot_controller.mpu6050_node:main',
+            'tag_to_pose_node = robot_controller.tag_to_pose_node:main', # ★ 비전 위치 추정 노드 추가!
         ],
     },
 )
