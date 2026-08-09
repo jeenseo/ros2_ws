@@ -2,26 +2,6 @@
 keyboard_node.py
 ================
 ROS 2 Node: 터미널 키보드 제어 — 메카넘/스키드-스티어 공용 (Vy=0 고정)
-
-[ROS 2 표준 명령 매핑]
-  W / ↑  : 전진  → linear.x  = +spd
-  S / ↓  : 후진  → linear.x  = -spd
-  A / ←  : 좌회전 → angular.z = +spd (CCW, ROS 2 표준)
-  D / →  : 우회전 → angular.z = -spd (CW)
-  Q      : 좌측 게걸음 → linear.y = +spd
-  E      : 우측 게걸음 → linear.y = -spd
-
-[특징]
-  - W/S는 linear.x만 제어 (angular.z 독립)
-  - A/D는 angular.z만 제어 (linear.x 독립)
-  - W+A 동시 입력 가능 = 전진 + 좌회전 (자연스러운 조작)
-  - 20Hz 타이머: 키 미입력 시 Twist(0,0,0) 게시 → 모터 안정 정지
-  - b/B: 속도 Normal(2000) ↔ Boost(4000) 토글
-  - m/M: MANUAL ↔ AUTO 모드 전환
-
-[토픽]
-  게시: /cmd_vel_keyboard (Twist) — MANUAL 모드에서만
-  게시: /mode              (String) — "MANUAL" | "AUTO"
 """
 
 import atexit
@@ -39,9 +19,14 @@ from geometry_msgs.msg import Twist
 from std_msgs.msg import String
 
 
-# ── 속도 레벨 ─────────────────────────────────────────────────────
-SPEED_NORMAL = 2100 / 9999   # ≈ 0.2002
-SPEED_BOOST  = 4000 / 9999   # ≈ 0.4001
+# ── 속도 레벨 (m/s 기준 계산: (목표PWM / 9999) * MAX_VX(0.95)) ──────
+SPEED_NORMAL    = (2000 / 9999.0) * 0.95  # 약 0.19 m/s -> 2000 PWM
+SPEED_BOOST     = (4000 / 9999.0) * 0.95  # 약 0.38 m/s -> 4000 PWM
+SPEED_OVERDRIVE = (8000 / 9999.0) * 0.95  # 약 0.76 m/s -> 8000 PWM ('o' 키 전용)
+
+# 메카넘 휠 회전 보정 비율 (MAX_WZ / MAX_VX) = 1.88 / 0.95
+# IK 계산 시 반토막 나는 회전 휠 속도를 직진 휠 속도와 동일하게 맞춰줍니다.
+TURN_MULTIPLIER = 1.978 
 
 
 class KeyboardNode(Node):
@@ -52,9 +37,11 @@ class KeyboardNode(Node):
         # ── 파라미터 선언 ─────────────────────────────────────────
         self.declare_parameter('normal_speed', SPEED_NORMAL)
         self.declare_parameter('boost_speed',  SPEED_BOOST)
+        self.declare_parameter('overdrive_speed', SPEED_OVERDRIVE)
 
-        self._spd_normal = self.get_parameter('normal_speed').value
-        self._spd_boost  = self.get_parameter('boost_speed').value
+        self._spd_normal    = self.get_parameter('normal_speed').value
+        self._spd_boost     = self.get_parameter('boost_speed').value
+        self._spd_overdrive = self.get_parameter('overdrive_speed').value
 
         # ── 토픽 게시자 ───────────────────────────────────────────
         self._cmd_pub  = self.create_publisher(Twist,  '/cmd_vel_keyboard', 10)
@@ -78,7 +65,7 @@ class KeyboardNode(Node):
             'KeyboardNode 준비 완료\n'
             '  W/↑=전진  S/↓=후진  A/←=좌회전  D/→=우회전\n'
             '  Q=좌측 게걸음  E=우측 게걸음\n'
-            '  m=MANUAL↔AUTO  b=Normal↔Boost  Ctrl+C=종료'
+            '  m=MANUAL↔AUTO  b=Boost(4000)  o=Overdrive(8000)  Ctrl+C=종료'
         )
         self._publish_mode()
 
@@ -101,12 +88,6 @@ class KeyboardNode(Node):
 
     # ── 키보드 루프 (백그라운드 데몬 스레드) ─────────────────────
     def _keyboard_loop(self) -> None:
-        """
-        비동기 멀티키 입력:
-          1. 50ms 폴 (select)
-          2. 입력 → 버퍼 드레인 → 키 집합 구성
-          3. 타임아웃 → 키 집합 클리어 (zero velocity 전환)
-        """
         ESCAPE_MAP = {
             '[A': 'W',   # ↑ = 전진
             '[B': 'S',   # ↓ = 후진
@@ -161,15 +142,16 @@ class KeyboardNode(Node):
                         self._publish_mode()
                         current_frame.clear()
 
+                    # ── 속도 모드 변경 ───────────────────────────────────
                     elif ch in ('b', 'B'):
-                        self._speed_mode = (
-                            'boost' if self._speed_mode == 'normal' else 'normal'
-                        )
-                        val = self._spd_boost if self._speed_mode == 'boost' else self._spd_normal
-                        self.get_logger().info(
-                            f'[SPEED] → {self._speed_mode.upper()} '
-                            f'({int(val * 9999)} / 9999)'
-                        )
+                        self._speed_mode = 'boost' if self._speed_mode != 'boost' else 'normal'
+                        val = 4000 if self._speed_mode == 'boost' else 2000
+                        self.get_logger().info(f'[SPEED] → {self._speed_mode.upper()} ({val} PWM)')
+
+                    elif ch in ('o', 'O'):
+                        self._speed_mode = 'overdrive' if self._speed_mode != 'overdrive' else 'normal'
+                        val = 8000 if self._speed_mode == 'overdrive' else 2000
+                        self.get_logger().info(f'[SPEED] → {self._speed_mode.upper()} ({val} PWM)')
 
                     # ── 이동 키 ───────────────────────────────────
                     elif ch in ('w', 'W'):
@@ -184,6 +166,19 @@ class KeyboardNode(Node):
                         current_frame.add('Q')   # linear.y + (좌측 스트레이프)
                     elif ch in ('e', 'E'):
                         current_frame.add('E')   # linear.y - (우측 스트레이프)
+                    # 🚀 [추가] 대각선 주행 키 (메카넘 전용: 전진/후진 + 좌/우 스트레이프)
+                    elif ch in ('t', 'T'):
+                        current_frame.add('W')
+                        current_frame.add('Q')   # T = 전진 + 좌측 게걸음 (11시 방향)
+                    elif ch in ('y', 'Y'):
+                        current_frame.add('W')
+                        current_frame.add('E')   # Y = 전진 + 우측 게걸음 (1시 방향)
+                    elif ch in ('g', 'G'):
+                        current_frame.add('S')
+                        current_frame.add('Q')   # G = 후진 + 좌측 게걸음 (7시 방향)
+                    elif ch in ('h', 'H'):
+                        current_frame.add('S')
+                        current_frame.add('E')   # H = 후진 + 우측 게걸음 (5시 방향)
 
                 with self._key_lock:
                     self._keys = current_frame
@@ -194,16 +189,19 @@ class KeyboardNode(Node):
 
     # ── 20Hz 타이머: MANUAL 모드 Twist 게시 ──────────────────────
     def _publish_cmd(self) -> None:
-        """
-        MANUAL 모드에서 20Hz로 /cmd_vel_keyboard 게시.
-        """
         if self._mode != 'MANUAL':
             return
 
         with self._key_lock:
             keys = set(self._keys)
 
-        spd = self._spd_boost if self._speed_mode == 'boost' else self._spd_normal
+        # 현재 설정된 속도 모드에 맞춰 spd 값(m/s) 가져오기
+        if self._speed_mode == 'overdrive':
+            spd = self._spd_overdrive
+        elif self._speed_mode == 'boost':
+            spd = self._spd_boost
+        else:
+            spd = self._spd_normal
 
         # ── W/S → linear.x (전진/후진) ───────────────────────────
         linear_x = 0.0
@@ -222,18 +220,20 @@ class KeyboardNode(Node):
         # ── A/D → angular.z (좌/우 회전) ─────────────────────────
         angular_z = 0.0
         if 'A' in keys:
-            angular_z += spd   # 좌회전 CCW (+)
+            angular_z += (spd * TURN_MULTIPLIER)   # CCW (+) 보정 적용
         if 'D' in keys:
-            angular_z -= spd   # 우회전 CW  (-)
+            angular_z -= (spd * TURN_MULTIPLIER)   # CW  (-) 보정 적용
 
         # ── Twist 메시지 구성 ─────────────────────────────────────
         msg = Twist()
+        # Overdrive 시 0.76이 들어가므로 1.0 캡에 걸리지 않습니다.
+        # 회전 값은 1.5 rad/s 이상 올라갈 수 있으므로 캡을 2.0으로 상향 조정했습니다.
         msg.linear.x  = max(-1.0, min(1.0, linear_x))
         msg.linear.y  = max(-1.0, min(1.0, linear_y))
         msg.linear.z  = 0.0
         msg.angular.x = 0.0
         msg.angular.y = 0.0
-        msg.angular.z = max(-1.0, min(1.0, angular_z))
+        msg.angular.z = max(-2.0, min(2.0, angular_z))
 
         self._cmd_pub.publish(msg)
 
@@ -254,3 +254,6 @@ def main(args=None):
     finally:
         node.destroy_node()
         rclpy.shutdown()
+
+if __name__ == '__main__':
+    main()
