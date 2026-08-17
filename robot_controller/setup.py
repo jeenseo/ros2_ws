@@ -38,10 +38,11 @@ setup(
         'console_scripts': [
             'lidar_node     = robot_controller.lidar_node:main',
             'motor_node     = robot_controller.motor_node:main',
-            'avoidance_node = robot_controller.avoidance_node:main',
             'keyboard_node  = robot_controller.keyboard_node:main',
             'mpu6050_node   = robot_controller.mpu6050_node:main',
-            'tag_to_pose_node = robot_controller.tag_to_pose_node:main', # ★ 비전 위치 추정 노드 추가!
+            'tag_to_pose_node = robot_controller.tag_to_pose_node:main',
+            'rf2o_covariance_relay = robot_controller.rf2o_covariance_relay:main',  # ★ 신규 추가
+            'imu_gyro_bias_node = robot_controller.imu_gyro_bias_node:main',        # ★ 신규 추가
         ],
     },
 )
