@@ -4,26 +4,13 @@ nav2.launch.py
 ROS 2 Nav2 통합 런치 파일 — Raspberry Pi 로컬 실행 전용 (Foxglove Studio)
 
 아키텍처:
-  LiDAR → rf2o → /odom_rf2o (TF 없음)
-                         ↓
-  MPU6050 → /imu/data   ↓
-                 EKF (robot_localization)
-                         ↓
-                 /odom + TF(odom→base_footprint) → Nav2
-
-TF 트리 (URDF 기반, robot_state_publisher가 발행):
-  base_footprint → base_link
-                      ├─ wheel_front_left/right_link
-                      ├─ wheel_rear_left/right_link
-                      ├─ lidar_link  (x=0.160, z=0.355, yaw=180°)
-                      └─ imu_link    (x=0.160, z=0.325)
-
-수정 이력:
-  - [수정] static_transform_publisher 노드 전체 제거
-           → robot_state_publisher (URDF) 로 대체
-  - [추가] mpu6050_node + EKF (robot_localization)
-  - [수정] rf2o_node: publish_tf=False, /odom_rf2o
-  - motor_node remapping: /cmd_vel_nav2 ← /cmd_vel
+  LiDAR → rf2o → /odom_rf2o → rf2o_covariance_relay → /odom_rf2o_cov
+                                                         ↓
+  MPU6050 → /imu/data → imu_gyro_bias_node → /imu/data_unbiased
+                                                         ↓
+                                                 EKF (robot_localization)
+                                                         ↓
+                                                 /odom + TF(odom→base_footprint) → Nav2
 """
 
 import os
@@ -57,19 +44,11 @@ def generate_launch_description():
     ekf_yaml_file    = os.path.join(pkg_dir, 'config', 'ekf.yaml')
     urdf_file        = os.path.join(pkg_dir, 'urdf',   'robot.urdf')
 
-    # URDF 파일 내용 읽기 (robot_state_publisher 파라미터로 전달)
+    # URDF 파일 내용 읽기
     with open(urdf_file, 'r') as f:
         robot_description = f.read()
 
-    # ─────────────────────────────────────────────────────────────
     # ── robot_state_publisher (URDF 기반 TF 발행) ────────────────
-    # ─────────────────────────────────────────────────────────────
-    # [수정] static_transform_publisher 3개 완전 제거
-    #        → robot_state_publisher가 URDF의 모든 fixed joint TF를 담당:
-    #            base_footprint → base_link
-    #            base_link → lidar_link  (x=0.160, z=0.355, yaw=180°)
-    #            base_link → imu_link    (x=0.160, z=0.325)
-    #            base_link → wheel_*_link (4개)
     robot_state_publisher_node = Node(
         package='robot_state_publisher',
         executable='robot_state_publisher',
@@ -81,9 +60,7 @@ def generate_launch_description():
         }],
     )
 
-    # ─────────────────────────────────────────────────────────────
     # ── LIDAR: sllidar_ros2 ───────────────────────────────────────
-    # ─────────────────────────────────────────────────────────────
     lidar_node = Node(
         package='sllidar_ros2',
         executable='sllidar_node',
@@ -99,9 +76,7 @@ def generate_launch_description():
         }],
     )
 
-    # ─────────────────────────────────────────────────────────────
     # ── IMU: MPU6050 ─────────────────────────────────────────────
-    # ─────────────────────────────────────────────────────────────
     mpu6050_node = Node(
         package='robot_controller',
         executable='mpu6050_node',
@@ -116,9 +91,15 @@ def generate_launch_description():
         }],
     )
 
-    # ─────────────────────────────────────────────────────────────
+    # ★ 신규: IMU 유령 데이터(바이어스) 제거 노드
+    imu_gyro_bias_node = Node(
+        package='robot_controller',
+        executable='imu_gyro_bias_node',
+        name='imu_gyro_bias_node',
+        output='screen',
+    )
+
     # ── 하드웨어: 모터 노드 ───────────────────────────────────────
-    # ─────────────────────────────────────────────────────────────
     motor_node = Node(
         package='robot_controller',
         executable='motor_node',
@@ -130,14 +111,13 @@ def generate_launch_description():
             'max_speed':   9999,
             'odom_frame':  'odom',
             'base_frame':  'base_footprint',
-            'odom_topic':  '/odom_motor',   # EKF odom1 소스 (충돌 방지)
+            'odom_topic':  '/odom_motor', 
+            'imu_topic':   '/imu/data_unbiased',  # ★ 변경됨: 정수기를 거친 깨끗한 물을 마심
         }],
-        # Nav2의 /cmd_vel 출력을 /cmd_vel_nav2로 수신
         remappings=[('/cmd_vel_nav2', '/cmd_vel')],
     )
-    # ─────────────────────────────────────────────────────────────
-    # ── 카메라: camera_ros (터미널 수동 실행 명령어 완벽 이식) ─────
-    # ─────────────────────────────────────────────────────────────
+
+    # ── 카메라: camera_ros ───────────────────────────────────────
     camera_node = Node(
         package='camera_ros',
         executable='camera_node',
@@ -147,17 +127,13 @@ def generate_launch_description():
             'width': 640,
             'height': 480,
             'format': 'RGB888',
-            'AfMode': 0,          # 오토포커스 끄기
-            'LensPosition': 2.0,  # 수동 초점 거리 고정 50cm, 0.5로 설정시(2.0m)
-            'fps': 10.0,          # 라즈베리파이 부하 방지용 10프레임 고정
+            'AfMode': 0,
+            'LensPosition': 2.0,
+            'fps': 10.0,
         }],
     )
 
-    # ─────────────────────────────────────────────────────────────
     # ── 오도메트리: rf2o (LiDAR 스캔 매칭) ───────────────────────
-    # ─────────────────────────────────────────────────────────────
-    # publish_tf=False: EKF가 odom→base_footprint TF 담당
-    # odom_topic=/odom_rf2o: EKF의 odom0 입력 토픽
     rf2o_node = Node(
         package='rf2o_laser_odometry',
         executable='rf2o_laser_odometry_node',
@@ -174,11 +150,15 @@ def generate_launch_description():
         }],
     )
 
-    # ─────────────────────────────────────────────────────────────
+    # ★ 신규: rf2o 위치 좌표를 EKF용 속도(Twist)로 변환하는 노드
+    rf2o_covariance_relay_node = Node(
+        package='robot_controller',
+        executable='rf2o_covariance_relay',
+        name='rf2o_covariance_relay',
+        output='screen',
+    )
+
     # ── EKF: IMU + LiDAR Odom 융합 ───────────────────────────────
-    # ─────────────────────────────────────────────────────────────
-    # /odometry/filtered → /odom 리맵
-    # odom → base_footprint TF 발행 (publish_tf: true in ekf.yaml)
     ekf_node = Node(
         package='robot_localization',
         executable='ekf_node',
@@ -190,9 +170,7 @@ def generate_launch_description():
         ],
     )
 
-    # ─────────────────────────────────────────────────────────────
     # ── 맵 + AMCL + 수명주기 관리자 (위치 추정) ─────────────────
-    # ─────────────────────────────────────────────────────────────
     map_server_node = Node(
         package='nav2_map_server',
         executable='map_server',
@@ -224,9 +202,7 @@ def generate_launch_description():
         }],
     )
 
-    # ─────────────────────────────────────────────────────────────
     # ── Nav2 네비게이션 스택 ──────────────────────────────────────
-    # ─────────────────────────────────────────────────────────────
     nav2_bringup_dir = FindPackageShare('nav2_bringup')
 
     nav2_launch = IncludeLaunchDescription(
@@ -243,27 +219,23 @@ def generate_launch_description():
 
     # ─────────────────────────────────────────────────────────────
     return LaunchDescription([
-        # Launch 인수
         use_nav2_arg,
 
-        # URDF 기반 TF 트리 (static_transform_publisher 대체)
         robot_state_publisher_node,
 
-        # 하드웨어 (LiDAR, IMU, Motor)
         lidar_node,
         mpu6050_node,
+        imu_gyro_bias_node,          # ★ 신규 편입
         motor_node,
-        camera_node,    
+        # camera_node,  
 
-        # 오도메트리 + EKF 융합
         rf2o_node,
+        rf2o_covariance_relay_node,  # ★ 신규 편입
         ekf_node,
 
-        # 위치 추정 (Map + AMCL)
         map_server_node,
         amcl_node,
         lifecycle_manager_localization,
 
-        # Nav2 플래너/컨트롤러 스택
         nav2_launch,
     ])

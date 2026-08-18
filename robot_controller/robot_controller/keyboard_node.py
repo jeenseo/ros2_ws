@@ -86,8 +86,23 @@ class KeyboardNode(Node):
         self.declare_parameter('publish_hz',      20.0)
         # 스레드가 이 시간 넘게 살아있음을 알리지 않으면 '사망'으로 간주
         self.declare_parameter('input_watchdog',  0.5)
-        # 키를 뗀 것으로 판정하기까지의 유예 (터미널 auto-repeat 초기 지연 흡수)
-        self.declare_parameter('key_release_grace', 0.15)
+        # ★ [수정] 키를 뗀 것으로 판정하기까지의 유예 0.15 → 0.60
+        #
+        #   [0.15 이면 왜 멈칫거리는가]
+        #     리눅스 터미널 auto-repeat 는 "첫 문자 → 약 0.5초 침묵 → 30Hz 연타" 구조입니다.
+        #     키를 계속 누르고 있어도 처음 0.5초 동안은 문자가 한 개만 옵니다.
+        #       t=0.00  W 눌림, 문자 1개 도착
+        #       t=0.15  유예 만료 → keys 비움 → 정지          ← 멈칫
+        #       t=0.50  auto-repeat 시작 → 재출발
+        #     => 유예는 반드시 터미널 auto-repeat 초기 지연보다 길어야 합니다.
+        #
+        #   [대가] 키를 뗀 뒤에도 이 시간만큼 명령이 유지됩니다.
+        #     0.6s x 0.76 m/s = 약 0.46 m 를 더 갑니다. 좁은 곳에서는 0.4 로 줄이십시오.
+        #     현재 auto-repeat 지연 확인:  콘솔 `kbdrate` / X11 `xset q`
+        #
+        #   ※ 캘리브레이션 주행에는 키보드를 쓰지 마십시오. cruise_node.py 를 쓰면
+        #     가감속 프로파일이 매번 동일하게 재현됩니다.
+        self.declare_parameter('key_release_grace', 0.60)
 
         gp = self.get_parameter
         self._spd_normal    = gp('normal_speed').value
