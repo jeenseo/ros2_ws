@@ -745,7 +745,14 @@ class MotorNode(Node):
         self.declare_parameter('yaw_comp_kp',     1.0)
         self.declare_parameter('yaw_comp_ki',     1.5)
         self.declare_parameter('yaw_comp_limit',  0.35)   # [rad/s] 보상 권한 상한
-        self.declare_parameter('yaw_comp_deadband', 0.01) # [rad/s] 자이로 노이즈 무시 대역
+        # ★ [수정] 데드밴드 0.010 -> 0.005
+        #   데드밴드는 "이 값 이하 오차는 무시"이므로 그대로 정상상태 오차의 바닥이 됩니다.
+        #     0.010 rad/s x 11초 = 6.3°  <- 게인을 아무리 잘 잡아도 못 없앰
+        #     0.005 -> 바닥 3.2° ,  0.003 -> 바닥 1.9°
+        #   mpu6050_node v2(DLPF 20Hz + 버스트읽기) 적용 후 자이로 잡음 ~0.0004 rad/s RMS
+        #   이므로 0.003 까지도 채터링 없이 내려갈 수 있습니다.
+        #   우선 0.005 로 쓰고, 잔류 쏠림이 3°대에서 더 안 줄면 0.003 으로 낮추십시오.
+        self.declare_parameter('yaw_comp_deadband', 0.005) # [rad/s] 자이로 노이즈 무시 대역
 
         gp = self.get_parameter
         channel          = gp('can_channel').value
