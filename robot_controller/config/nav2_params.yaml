@@ -1,288 +1,270 @@
-# nav2_params.yaml
-# ================
-# ROS 2 Nav2 파라미터 — 자율 장애물 회피 로봇
+# ═══════════════════════════════════════════════════════════════════════════
+# nav2_params.yaml — 메카넘(전방향) 로봇용
+# ═══════════════════════════════════════════════════════════════════════════
 #
-# 로봇 특성:
-#   구동: 메카넘 (Omni, 전방위 이동)
-#   LiDAR: RPLIDAR A1  /scan  (frame: lidar_link)
-#   오도메트리: rf2o_laser_odometry (스캔 매칭, 엔코더 없음)
-#   맵: maps/map.yaml (사전 빌드된 정적 맵)
+# ★ 이 로봇이 표준 Nav2 예제와 다른 3가지 (여기만 제대로 보시면 됩니다)
 #
-# TF 트리: map → odom → base_footprint → base_link → lidar_link
+#   1) 홀로노믹입니다.  메카넘은 옆으로 갑니다(Vy).
+#      기본 예제는 차동구동 가정이라 min/max_vel_y = 0.0 입니다. 그대로 두면
+#      Nav2 가 로봇의 능력 절반을 못 씁니다. 아래에서 ±0.20 으로 열었습니다.
+#      AMCL 도 DifferentialMotionModel 이 아니라 **OmniMotionModel** 이어야
+#      횡방향 이동을 파티클 확산에 반영합니다.
+#
+#   2) base_frame 이 base_link 가 아니라 **base_footprint** 입니다.
+#      ekf.yaml 의 base_link_frame 과 반드시 같아야 합니다. 다르면 코스트맵이
+#      로봇을 못 찾아 "Robot is out of bounds" 로 죽습니다.
+#
+#   3) 실제 최고속이 명령값보다 느립니다.
+#      펌웨어 MOTOR_MAX_RPM 150 이지만 엔코더 CPR 불일치(아래 설명 참조)로
+#      실제 도달 속도는 약 0.5 m/s 입니다. max_vel_x 를 0.30 으로 잡아
+#      Nav2 가 "명령했는데 안 따라온다"고 판단하지 않게 했습니다.
+#      펌웨어 ENCODER_CPR 을 고치고 나면 0.45 까지 올릴 수 있습니다.
+# ═══════════════════════════════════════════════════════════════════════════
 
 amcl:
   ros__parameters:
-    use_sim_time:         false
-    alpha1:               0.2
-    alpha2:               0.2
-    alpha3:               0.2
-    alpha4:               0.2
-    alpha5:               0.2
-    base_frame_id:        "base_footprint"
-    beam_skip_distance:   0.5
-    beam_skip_error_threshold: 0.9
-    beam_skip_threshold:  0.3
-    do_beamskip:          false
-    global_frame_id:      "map"
-    lambda_short:         0.1
-    laser_likelihood_max_dist: 2.0
-    laser_max_range:      100.0
-    laser_min_range:      -1.0
-    laser_model_type:     "likelihood_field"
-    max_beams:            60
-    max_particles:        2000
-    min_particles:        500
-    odom_frame_id:        "odom"
-    pf_err:               0.05
-    pf_z:                 0.99
-    recovery_alpha_fast:  0.0
-    recovery_alpha_slow:  0.0
-    resample_interval:    1
-    robot_model_type:     "nav2_amcl::DifferentialMotionModel"
-    save_pose_rate:       0.5
-    sigma_hit:            0.2
-    tf_broadcast:         true
-    transform_tolerance:  1.0
-    update_min_a:         0.5
-    update_min_d:         0.5
-    z_hit:                0.5
-    z_max:                0.05
-    z_rand:               0.5
-    z_short:              0.05
-    scan_topic:           "/scan"
-    map_topic:            "map"
-    set_initial_pose:     true
-    initial_pose:
-      x:     0.0
-      y:     0.0
-      z:     0.0
-      yaw:   0.0
+    use_sim_time: false
+    base_frame_id: "base_footprint"      # ★ ekf.yaml 과 일치
+    odom_frame_id: "odom"
+    global_frame_id: "map"
+    scan_topic: scan
 
+    # ★ 메카넘 = 전방향. Differential 로 두면 횡이동을 모델이 설명 못 해
+    #   파티클이 계속 뒤처지고 위치추정이 튑니다.
+    robot_model_type: "nav2_amcl::OmniMotionModel"
+
+    # 오도메트리 노이즈 모델. alpha1~4 는 회전/직진 상호 오염,
+    # alpha5 는 Omni 모델 전용(횡방향 이동 노이즈).
+    # 우리 오도메트리는 요를 자이로에서 받으므로 회전 신뢰도가 비교적 높습니다.
+    #   ★ [C단계 실측 반영] 72m x 2m 복도에서는 라이다가 X 를 전혀 구속하지
+    #     못합니다. 그 상황에서 alpha3 를 크게 두면 파티클이 X 로 계속 퍼지는데,
+    #     퍼진 것을 다시 모아 줄 관측이 없어 추정이 그대로 방황합니다.
+    #     C-1 에서 오도메트리 오차가 RMS 1.22% 로 검증됐으므로 **믿어야 합니다.**
+    #     0.25 -> 0.10 (측정 1.2% 대비 8배 여유는 남김)
+    alpha1: 0.10     # 회전 -> 회전   (자이로 기반, C-2 실측 0.92%)
+    alpha2: 0.10     # 직진 -> 회전
+    alpha3: 0.10     # ★ 직진 -> 직진 (C-1 실측 RMS 1.22%)
+    alpha4: 0.10     # 회전 -> 직진
+    alpha5: 0.20     # Omni 전용: 횡방향(Vy). 개루프 적분이라 상대적으로 크게 유지.
+
+    max_particles: 2000
+    min_particles: 500
+    laser_max_range: 12.0
+    laser_min_range: 0.15
+    laser_model_type: "likelihood_field"
+    max_beams: 60
+    update_min_a: 0.15               # [rad] 이만큼 회전해야 갱신
+    update_min_d: 0.15               # [m]   이만큼 이동해야 갱신
+    resample_interval: 1
+    transform_tolerance: 0.5
+    set_initial_pose: false
+    always_reset_initial_pose: false
+
+map_server:
+  ros__parameters:
+    use_sim_time: false
+    yaml_filename: ""                # launch 의 map:= 인자로 주입됩니다
+
+map_saver:
+  ros__parameters:
+    use_sim_time: false
+    save_map_timeout: 5.0
+    free_thresh_default: 0.25
+    occupied_thresh_default: 0.65
+
+# ═══════════════════════════════════════════════════════════════════════════
 bt_navigator:
   ros__parameters:
     use_sim_time: false
     global_frame: map
-    robot_base_frame: base_footprint
+    robot_base_frame: base_footprint   # ★
     odom_topic: /odom
     bt_loop_duration: 10
     default_server_timeout: 20
-    navigators: ['navigate_to_pose', 'navigate_through_poses']
-    navigate_to_pose:
-      plugin: "nav2_bt_navigator::NavigateToPoseNavigator"
-    navigate_through_poses:
-      plugin: "nav2_bt_navigator::NavigateThroughPosesNavigator"
-    error_code_names:
-      - compute_path_error_code
-      - follow_path_error_code
 
+# ═══════════════════════════════════════════════════════════════════════════
 controller_server:
   ros__parameters:
-    use_sim_time:                 false
-    controller_frequency:         20.0
-    min_x_velocity_threshold:     0.001
-    min_y_velocity_threshold:     0.5
-    min_theta_velocity_threshold: 0.001
-    failure_tolerance:            0.3
-    progress_checker_plugin:      "progress_checker"
-    goal_checker_plugins:         ["general_goal_checker"]
-    controller_plugins:           ["FollowPath"]
+    use_sim_time: false
+    controller_frequency: 10.0         # Pi 5 + 이 센서 구성에서 20Hz 는 버겁습니다
+    min_x_velocity_threshold: 0.02
+    min_y_velocity_threshold: 0.02
+    min_theta_velocity_threshold: 0.05
+    failure_tolerance: 0.5
+    progress_checker_plugins: ["progress_checker"]
+    goal_checker_plugins: ["general_goal_checker"]
+    controller_plugins: ["FollowPath"]
 
     progress_checker:
       plugin: "nav2_controller::SimpleProgressChecker"
-      required_movement_radius: 0.2
-      movement_time_allowance:  5.0
+      required_movement_radius: 0.5
+      movement_time_allowance: 15.0
 
     general_goal_checker:
-      stateful:        True
-      plugin:          "nav2_controller::SimpleGoalChecker"
-      xy_goal_tolerance:  0.15           
-      yaw_goal_tolerance: 0.10           
-      latch_xy_goal_tolerance: true      
+      plugin: "nav2_controller::SimpleGoalChecker"
+      stateful: true
+      xy_goal_tolerance: 0.20
+      yaw_goal_tolerance: 0.20
 
     FollowPath:
-      plugin: "nav2_mppi_controller::MPPIController"
-      time_steps: 60       
-      model_dt: 0.05       
-      batch_size:      2000     
-      iteration_count: 1
-      temperature:     0.3      
-      gamma:           0.015
+      plugin: "dwb_core::DWBLocalPlanner"
+      debug_trajectory_details: true
 
-      vx_max: 0.30
-      vx_min: -0.30        
-      vy_max: 0.20         
-      vy_min: -0.20        
-      wz_max: 0.50 
-      
-      vx_std: 0.20         
-      vy_std: 0.40         
-      wz_std: 0.20
-      
-      motion_model: "Omni" 
+      # ── ★ 홀로노믹 속도 한계 ────────────────────────────────────
+      min_vel_x: -0.15
+      max_vel_x:  0.30                 # ★ max_wheel_speed 보정 후 '실제로' 0.30 m/s
+      min_vel_y: -0.20                 # ★ 메카넘: 횡이동 허용
+      max_vel_y:  0.20                 # ★
+      max_vel_theta: 0.80
+      min_speed_xy: 0.0
+      max_speed_xy: 0.35
+      min_speed_theta: 0.0
 
-      critics: ["ObstaclesCritic", "PathFollowCritic", "PathAngleCritic", "GoalCritic", "GoalAngleCritic", "PreferForwardCritic", "TwirlingCritic"]
-      
-      ObstaclesCritic:
-        plugin: "mppi::ObstaclesCritic"
-        critical_weight:  200.0
-        repulsion_weight: 2.0
-        critical_distance: 0.55
-        collision_cost:   100000.0
-        near_goal_distance: 0.5
-        robot_radius: 0.38
+      acc_lim_x: 1.0
+      acc_lim_y: 1.0                   # ★
+      acc_lim_theta: 2.0
+      decel_lim_x: -1.5
+      decel_lim_y: -1.5                # ★
+      decel_lim_theta: -2.5
 
-      PathFollowCritic:
-        plugin: "mppi::PathFollowCritic"
-        offset_from_furthest: 8
-        max_path_ratio:  0.2
+      # ── 궤적 샘플링 ─────────────────────────────────────────────
+      #   vy_samples 를 0 이 아니라 10 으로 두어야 실제로 횡이동을 씁니다.
+      vx_samples: 20
+      vy_samples: 10                   # ★ 기본 예제는 5 또는 0
+      vtheta_samples: 20
+      sim_time: 1.7
+      linear_granularity: 0.05
+      angular_granularity: 0.025
+      transform_tolerance: 0.3
 
-      PathAngleCritic:
-        plugin: "mppi::PathAngleCritic"
-        offset_from_furthest: 4
-        threshold_to_consider: 0.40
-        max_angle_to_furthest: 1.0
+      trajectory_generator_name: "dwb_plugins::StandardTrajectoryGenerator"
+      critics: ["RotateToGoal", "Oscillation", "BaseObstacle", "GoalAlign",
+                "PathAlign", "PathDist", "GoalDist"]
+      BaseObstacle.scale: 0.02
+      PathAlign.scale: 32.0
+      PathAlign.forward_point_distance: 0.10
+      GoalAlign.scale: 24.0
+      GoalAlign.forward_point_distance: 0.10
+      PathDist.scale: 32.0
+      GoalDist.scale: 24.0
+      RotateToGoal.scale: 32.0
+      RotateToGoal.slowing_factor: 5.0
+      RotateToGoal.lookahead_time: -1.0
 
-      GoalCritic:
-        plugin: "mppi::GoalCritic"
-        threshold_to_consider: 1.4
-
-      GoalAngleCritic:
-        plugin: "mppi::GoalAngleCritic"
-        threshold_to_consider: 0.40
-
-      PreferForwardCritic:
-        plugin: "mppi::PreferForwardCritic"
-        penalty_weight: 0.2
-
-      TwirlingCritic:
-        plugin: "mppi::TwirlingCritic"
-        twirling_cost_weight: 10.0
-
-local_costmap: 
+# ═══════════════════════════════════════════════════════════════════════════
+local_costmap:
   local_costmap:
     ros__parameters:
-      use_sim_time:       false
-      update_frequency:   10.0
-      publish_frequency:  10.0  
-      global_frame:       odom
-      robot_base_frame:   base_footprint
-      transform_tolerance: 1.0 
-      rolling_window:     true
-      width:              5
-      height:             5
-      resolution:         0.1 
-      footprint: "[[0.25, 0.28], [0.25, -0.28], [-0.25, -0.28], [-0.25, 0.28]]"
-      footprint_padding: 0.0     
-      plugins: ["obstacle_layer", "inflation_layer"]
-      
-      inflation_layer:
-        plugin:              "nav2_costmap_2d::InflationLayer"
-        cost_scaling_factor: 3.0
-        inflation_radius:    0.80
-        
-      obstacle_layer:
-        plugin:               "nav2_costmap_2d::ObstacleLayer"
-        enabled:              True
-        observation_sources:  scan
-        footprint_clearing_enabled: True 
-        scan:
-          topic:               /scan
-          sensor_frame:        lidar_link
-          inf_is_valid:        True
-          max_obstacle_height: 2.0
-          min_obstacle_height: 0.0
-          clearing:            True
-          marking:             True
-          data_type:           "LaserScan"
-          raytrace_max_range:  10.0
-          raytrace_min_range:  0.0
-          obstacle_max_range:  2.5 
-          obstacle_min_range:  0.10
-      
-      always_send_full_costmap: True
+      use_sim_time: false
+      update_frequency: 5.0
+      publish_frequency: 2.0
+      global_frame: odom
+      robot_base_frame: base_footprint   # ★
+      rolling_window: true
+      width: 4
+      height: 4
+      resolution: 0.05
 
-global_costmap: 
-  global_costmap:
-    ros__parameters:
-      use_sim_time:        false
-      update_frequency:    0.1
-      publish_frequency:   0.1
-      global_frame:        map           
-      robot_base_frame:    base_footprint
-      transform_tolerance: 1.0           
-      resolution:          0.05
-      footprint: "[[0.25, 0.28], [0.25, -0.28], [-0.25, -0.28], [-0.25, 0.28]]"
-      footprint_padding:   0.0
-      plugins: ["static_layer", "obstacle_layer", "inflation_layer"]
-      
-      static_layer:
-        plugin:    "nav2_costmap_2d::StaticLayer"
-        enabled:   True
-        map_subscribe_transient_local: True
-        
+      # ★ URDF 에서 유도. 본체 박스(0.50x0.40)보다 **바퀴가 더 튀어나옵니다**.
+      #   x: 조인트 0.25 + 바퀴반경 0.06 = 0.31   (본체 0.25 보다 큼)
+      #   y: 조인트 0.255 + 바퀴폭/2 0.04 = 0.295 (본체 0.20 보다 큼)
+      #   본체 치수로 잡으면 바퀴가 코스트맵 밖으로 나가 벽을 긁습니다.
+      footprint: "[[0.31, 0.29], [0.31, -0.29], [-0.31, -0.29], [-0.31, 0.29]]"
+      footprint_padding: 0.02
+
+      plugins: ["obstacle_layer", "inflation_layer"]
       obstacle_layer:
-        plugin:              "nav2_costmap_2d::ObstacleLayer"
-        enabled:             True
+        plugin: "nav2_costmap_2d::ObstacleLayer"
+        enabled: true
         observation_sources: scan
         scan:
-          topic:               /scan
-          sensor_frame:        lidar_link
-          inf_is_valid:        True
+          topic: /scan
           max_obstacle_height: 2.0
-          clearing:            True
-          marking:             True
-          data_type:           "LaserScan"
-          raytrace_max_range:  10.0
-          raytrace_min_range:  0.0
-          obstacle_max_range:  2.5
-          obstacle_min_range:  0.0
-          
+          clearing: true
+          marking: true
+          data_type: "LaserScan"
+          raytrace_max_range: 10.0
+          raytrace_min_range: 0.0
+          obstacle_max_range: 6.0
+          obstacle_min_range: 0.0
       inflation_layer:
-        plugin:              "nav2_costmap_2d::InflationLayer"
-        cost_scaling_factor: 5.0
-        inflation_radius:    0.45
-      always_send_full_costmap: False
+        plugin: "nav2_costmap_2d::InflationLayer"
+        cost_scaling_factor: 3.0
+        # ★ 복도 폭 2.0 m 기준 재조정.
+        #   0.58 이면 비용 0 인 통로 폭이 2.0-2x0.58 = 0.84 m 밖에 안 남습니다.
+        #   로봇 폭 0.58 + padding -> 0.62. 여유가 22 cm 뿐이라 좁아지는 구간에서
+        #   경로가 끊길 수 있습니다. 0.45 로 낮추면 통로 1.10 m 확보.
+        #   (정확성 요건은 외접원 0.424 이상이므로 0.45 는 유효)
+        inflation_radius: 0.45
+      always_send_full_costmap: true
 
-map_server:
-  ros__parameters:
-    use_sim_time:  false
-    yaml_filename: "/mnt/c/Users/tjwld/ros2_ws/src/robot_controller/maps/map.yaml"
+global_costmap:
+  global_costmap:
+    ros__parameters:
+      use_sim_time: false
+      update_frequency: 1.0
+      publish_frequency: 1.0
+      global_frame: map
+      robot_base_frame: base_footprint  # ★
+      resolution: 0.05
+      track_unknown_space: true
+      footprint: "[[0.31, 0.29], [0.31, -0.29], [-0.31, -0.29], [-0.31, 0.29]]"
+      footprint_padding: 0.02
+      plugins: ["static_layer", "obstacle_layer", "inflation_layer"]
+      static_layer:
+        plugin: "nav2_costmap_2d::StaticLayer"
+        map_subscribe_transient_local: true
+      obstacle_layer:
+        plugin: "nav2_costmap_2d::ObstacleLayer"
+        enabled: true
+        observation_sources: scan
+        scan:
+          topic: /scan
+          max_obstacle_height: 2.0
+          clearing: true
+          marking: true
+          data_type: "LaserScan"
+          raytrace_max_range: 10.0
+          obstacle_max_range: 6.0
+      inflation_layer:
+        plugin: "nav2_costmap_2d::InflationLayer"
+        cost_scaling_factor: 3.0
+        inflation_radius: 0.45
+      # ★ 이 지도는 1800x483 = 869,400 셀입니다. full costmap 을 1 Hz 로 통째
+      #   전송하면 약 0.87 MB/s 가 DDS 로 흐릅니다. Pi 5 에서는 부담이므로
+      #   변경분만 보내도록 false 로 둡니다. (RViz 표시는 정상 동작합니다)
+      always_send_full_costmap: false
 
-map_saver:
-  ros__parameters:
-    use_sim_time:              false
-    save_map_timeout:          5.0
-    free_thresh_default:       0.25
-    occupied_thresh_default:   0.65
-    map_subscribe_transient_local: True
-
+# ═══════════════════════════════════════════════════════════════════════════
 planner_server:
   ros__parameters:
-    expected_planner_frequency: 20.0
-    use_sim_time:               false
-    planner_plugins:            ["GridBased"]
+    use_sim_time: false
+    expected_planner_frequency: 1.0
+    planner_plugins: ["GridBased"]
     GridBased:
-      plugin:        "nav2_navfn_planner::NavfnPlanner"
-      tolerance:     0.5
-      use_astar:     false
+      plugin: "nav2_navfn_planner::NavfnPlanner"
+      tolerance: 0.5
+      use_astar: false
       allow_unknown: true
 
 smoother_server:
   ros__parameters:
-    use_sim_time:     false
+    use_sim_time: false
     smoother_plugins: ["simple_smoother"]
     simple_smoother:
-      plugin:         "nav2_smoother::SimpleSmoother"
-      tolerance:      1.0e-10
-      max_its:        1000
-      do_refinement:  True
+      plugin: "nav2_smoother::SimpleSmoother"
+      tolerance: 1.0e-10
+      max_its: 1000
+      do_refinement: true
 
 behavior_server:
   ros__parameters:
-    costmap_topic:    local_costmap/costmap_raw
-    footprint_topic:  local_costmap/published_footprint
-    cycle_frequency:  10.0
-    behavior_plugins: ["spin", "backup", "drive_on_heading", "assisted_teleop", "wait"]
+    use_sim_time: false
+    local_frame: odom
+    global_frame: map
+    robot_base_frame: base_footprint    # ★
+    transform_tolerance: 0.2
+    behavior_plugins: ["spin", "backup", "drive_on_heading", "wait"]
     spin:
       plugin: "nav2_behaviors::Spin"
     backup:
@@ -291,74 +273,27 @@ behavior_server:
       plugin: "nav2_behaviors::DriveOnHeading"
     wait:
       plugin: "nav2_behaviors::Wait"
-    assisted_teleop:
-      plugin: "nav2_behaviors::AssistedTeleop"
-    global_frame:           odom
-    robot_base_frame:       base_footprint
-    transform_tolerance:    1.0
-    use_sim_time:           false
-    simulate_ahead_time:    2.0
-    max_rotational_vel:     0.4
-    min_rotational_vel:     0.1
-    rotational_acc_lim:     0.3
-
-waypoint_follower:
-  ros__parameters:
-    use_sim_time:            false
-    loop_rate:               20
-    stop_on_failure:         false
-    waypoint_task_executor_plugin: "wait_at_waypoint"
-    wait_at_waypoint:
-      plugin:                 "nav2_waypoint_follower::WaitAtWaypoint"
-      enabled:                True
-      waypoint_pause_duration: 200
+    max_rotational_vel: 0.8
+    min_rotational_vel: 0.2
+    rotational_acc_lim: 2.0
 
 velocity_smoother:
   ros__parameters:
-    use_sim_time:         false
-    smoothing_frequency:  20.0
-    scale_velocities:     False
-    feedback:             "OPEN_LOOP"
-    max_velocity:         [0.30, 0.20, 0.3]   
-    min_velocity:         [-0.30, -0.20, -0.3]  
-    max_accel:            [0.30, 0.20, 0.2]   
-    max_decel:            [-0.20, -0.20, -0.2]  
-    odom_topic:           "odom"
-    odom_duration:        0.1
-    deadband_velocity:    [0.0, 0.0, 0.0]
-    velocity_timeout:     1.0
+    use_sim_time: false
+    smoothing_frequency: 20.0
+    scale_velocities: false
+    feedback: "OPEN_LOOP"
+    # 순서: [x, y, theta]  ★ y 를 0 이 아니라 열어둡니다
+    max_velocity: [0.30, 0.20, 0.80]
+    min_velocity: [-0.15, -0.20, -0.80]
+    max_accel: [1.0, 1.0, 2.0]
+    max_decel: [-1.5, -1.5, -2.5]
+    odom_topic: "/odom"
+    odom_duration: 0.1
 
 collision_monitor:
   ros__parameters:
     use_sim_time: false
-    base_frame_id: "base_footprint"
+    base_frame_id: "base_footprint"     # ★
     odom_frame_id: "odom"
-    cmd_vel_in_topic: "cmd_vel_smoothed"
-    cmd_vel_out_topic: "cmd_vel"
-    state_topic: "collision_monitor_state"
-    transform_tolerance: 1.0 
-    source_timeout: 5.0
-    stop_pub_timeout: 2.0
-    polygons: ["dummy_box"]
-    dummy_box:
-      type: "polygon"
-      points: "[[0.01, 0.01], [0.01, -0.01], [-0.01, -0.01], [-0.01, 0.01]]"
-      action_type: "stop"
-      min_points: 4
-      visualize: false
-      polygon_pub_topic: "polygon_stop"
-    observation_sources: ["scan"]
-    scan:
-      type: "scan"
-      topic: "/scan"
-      
-docking_server:
-  ros__parameters:
-    use_sim_time: false
-    controller_frequency: 50.0
-    dock_plugins: ['simple_dock']
-    simple_dock:
-      plugin: 'opennav_docking::SimpleChargingDock'
-      docking_threshold: 0.05
-      staging_x_offset: -0.5
-      staging_yaw_offset: 0.0
+    transform_tolerance: 0.5

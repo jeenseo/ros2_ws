@@ -124,7 +124,10 @@ from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import Imu
 from std_msgs.msg import Bool, String, Float32MultiArray
+from rcl_interfaces.msg import SetParametersResult
 
+import errno
+import subprocess
 import can
 
 
@@ -474,20 +477,30 @@ class YawRateCompensator:
     """
 
     def __init__(self, kp: float = 1.0, ki: float = 1.5,
-                 limit: float = 0.35, deadband: float = 0.01) -> None:
+                 limit: float = 0.35, deadband: float = 0.01,
+                 lpf_hz: float = 2.0) -> None:
         self.kp, self.ki = kp, ki
         self.limit = limit
         self.deadband = deadband     # [rad/s] 자이로 노이즈에 적분기가 끌려가지 않도록
+        # ★ [v8] 측정 경로 1차 저역통과 차단주파수 [Hz]. 0 이면 비활성.
+        self.lpf_hz = lpf_hz
+        self._meas_f: float | None = None
         self._integral = 0.0
         self._last_out = 0.0
 
     def reset(self) -> None:
         self._integral = 0.0
         self._last_out = 0.0
+        self._meas_f = None
 
     @property
     def output(self) -> float:
         return self._last_out
+
+    @property
+    def filtered(self) -> float:
+        """저역통과 후 요레이트 [rad/s]. 진단용 — 필터가 실제로 먹는지 확인."""
+        return self._meas_f if self._meas_f is not None else 0.0
 
     def update(self, target_wz: float, measured_wz: float,
                dt: float, active: bool) -> float:
@@ -496,9 +509,44 @@ class YawRateCompensator:
             # 정지 중에도 적분기를 살려두면 재출발 순간 킥이 발생합니다.
             self._integral *= math.exp(-dt / 0.5)   # 0.5s 시상수로 부드럽게 방전
             self._last_out = 0.0
+            # ★ 필터 상태를 비웁니다(추종시키지 않습니다).
+            #   [처음에 '추종' 으로 짰다가 검증에서 걸러낸 버그]
+            #     비활성 중 마지막 측정을 붙들고 있으면, 그 값이 컸을 때
+            #     (예: 직전에 0.30 rad/s 로 회전) 재활성 첫 스텝의 err 가
+            #     그 옛 값 기준이 되어 출력이 즉시 limit(0.35)까지 포화합니다.
+            #     "킥을 막으려던 코드가 킥을 만드는" 상태였습니다.
+            #   None 으로 두면 재활성 첫 샘플이 필터를 초기화하므로
+            #   그 스텝의 출력이 LPF 없을 때와 **정확히 동일**해집니다(무충격).
+            self._meas_f = None
             return 0.0
 
-        err = target_wz - measured_wz
+        # ── ★ [v8] 측정 경로 1차 저역통과 ────────────────────────────
+        #   [왜 필요한가 — IMU 앨리어싱을 고치자 진짜 진동이 드러났습니다]
+        #     이전에는 mpu6050 발행이 20.9~35.2 Hz 인데 DLPF 가 20 Hz 라
+        #     안티앨리어싱 조건(DLPF < fs/2)을 위반하고 있었습니다.
+        #     고주파 진동이 접혀 들어와 '느린 드리프트처럼' 뭉개졌고,
+        #     그 뭉개진(=우연히 부드러운) 신호에 맞춰 Kp=4.0 을 튜닝했습니다.
+        #     publish_hz 를 50 으로 올려 앨리어싱을 없애자, 자이로가 메카넘
+        #     롤러/바닥의 실제 요 진동을 정직하게 보고하기 시작했고
+        #     Kp 가 그것을 그대로 바퀴 명령으로 증폭했습니다.
+        #
+        #   [왜 저역통과가 옳은 도구인가]
+        #     우리가 상쇄하려는 외란(곡률 드리프트 kappa*v)은 사실상 DC 입니다
+        #     — 실측 0.0376 rad/s 의 '일정한' 값. 반면 잡음은 수 Hz 이상입니다.
+        #     둘이 주파수축에서 완전히 분리돼 있으므로, 2 Hz 저역통과는
+        #     외란 제거 능력을 거의 잃지 않으면서 잡음만 지웁니다.
+        #     (시뮬레이션: Kp=6 까지도 LPF 로 인한 발진 없음 = 위상 대가 미미)
+        #
+        #   1차 IIR:  a = 1 - exp(-2*pi*fc*dt)   (dt 가 흔들려도 정확한 형태)
+        m = measured_wz
+        if self.lpf_hz > 0.0:
+            if self._meas_f is None:
+                self._meas_f = measured_wz          # 첫 샘플로 초기화 = 무충격
+            a = 1.0 - math.exp(-2.0 * math.pi * self.lpf_hz * dt)
+            self._meas_f += a * (measured_wz - self._meas_f)
+            m = self._meas_f
+
+        err = target_wz - m
         if abs(err) < self.deadband:
             err = 0.0
 
@@ -560,10 +608,13 @@ _IMU_QOS = QoSProfile(
 # ── 물리 상수 ─────────────────────────────────────────────────────────────
 _WHEEL_DIAMETER_M = 0.12
 _WHEEL_CIRCUM_M   = math.pi * _WHEEL_DIAMETER_M
-_ENCODER_CPR      = 1404                               # 13 PPR * 4체배 * 27 감속
+# ★ [v5] 아래 두 상수는 **더 이상 사용하지 않습니다** (파라미터 encoder_cpr 로 대체).
+#   1404 는 감속비를 27 로 가정한 값이었고, 실측 결과 실제는 51 이었습니다.
+#   호환성을 위해 남겨두되 코드 경로에서는 참조하지 않습니다.
+_ENCODER_CPR      = 1404                               # [폐기] 13 PPR * 4 * 27
 _TRACK_WIDTH_M    = 0.51
 _WHEELBASE_M      = 0.50
-_METER_PER_TICK   = _WHEEL_CIRCUM_M / _ENCODER_CPR     # ≈ 2.6853e-4 m/tick
+_METER_PER_TICK   = _WHEEL_CIRCUM_M / _ENCODER_CPR     # [폐기] self._m_per_tick 사용
 
 # 메카넘 IK 거리 상수 l = (track + wheelbase)/2, 요레이트 지레팔 = 2l = track + wheelbase
 _MECANUM_L        = (_TRACK_WIDTH_M + _WHEELBASE_M) / 2.0   # 0.505 m
@@ -577,7 +628,7 @@ _CAN_RX_FB_ID = 0x124
 # [Stage 1e] 한 프레임에 가능한 최대 엔코더 틱
 #   150 RPM = 2.5 rev/s -> 2.5 * 1404 = 3510 ticks/s. 20ms 프레임 = 70 ticks.
 #   여유 2배. 이보다 크면 노이즈이거나 프레임 유실 누적이므로 신뢰할 수 없습니다.
-_MAX_TICKS_PER_FRAME = 140
+_MAX_TICKS_PER_FRAME = 140   # [폐기] self._max_ticks 사용
 
 # [Stage 1e] SocketCAN 에러 클래스 (linux/can/error.h)
 #   ★ 이 비트들의 조합이 arbitration_id 로 올라오며, 0x123/0x124 와 겹칠 수 있습니다.
@@ -616,7 +667,12 @@ class MotorNode(Node):
         self.declare_parameter('odom_frame',  'odom')
         self.declare_parameter('base_frame',  'base_footprint')
         self.declare_parameter('odom_topic',  '/odom_motor')
-        self.declare_parameter('imu_topic',   '/imu/data')
+        # ★ [v4] 기본값을 바이어스 보정본으로 변경.
+        #   /imu/data 는 gz 에 +0.0124 rad/s (0.70 deg/s) 상수 바이어스가 있습니다.
+        #   보상기는 "자이로가 0 이라고 말할 때까지" 로봇을 돌리므로, 바이어스가
+        #   섞인 신호를 주면 그 바이어스만큼 **로봇을 일부러 반대로 돌립니다.**
+        #   즉 보상기가 드리프트를 만드는 쪽으로 작동합니다.
+        self.declare_parameter('imu_topic',   '/imu/data_unbiased')
 
         # ══ 스케일 보정 : [Stage 1b] 단일 스칼라 -> (scale, balance) 2파라미터 분해 ══
         #
@@ -646,6 +702,61 @@ class MotorNode(Node):
         #     (yaw 0.0/0.1/0.2 rad 로 바꿔도 0.7377~0.7379).
         #     반면 좌우 밸런스는 yaw 에 민감합니다(1.068 / 1.052 / 1.037).
         #     => 거리 보정은 지금 바로 신뢰 가능, 밸런스는 odom yaw 실측이 필요합니다.
+        # ── ★ [v5] 엔코더 CPR 을 파라미터로 승격 ─────────────────────
+        #   [실측 근거]  10초 직진 3회 (PWM 2000/4000/6000):
+        #     odom 이 실거리를 **1.8991배** 과대평가. 속도 의존성 없음(단일 상수).
+        #     틱수로 CPR 을 역산하면 2657.6 -> 13 PPR x 4체배 x **51 감속 = 2652**
+        #     와 오차 0.21% 로 일치합니다.
+        #   즉 이것은 '슬립 보정값'이 아니라 **감속비 상수가 27 로 잘못 적혀 있던 것**
+        #   입니다. 27 이 아니라 51 이었습니다.
+        #   CPR 을 고치면 잔여 스케일이 0.9945 (오차 0.55%) 가 되고, 이 0.55% 만이
+        #   진짜 메카넘 슬립입니다. 반대로 CPR 을 1404 로 두고 scale=0.5266 을 넣으면
+        #   수치는 같지만 **단위 오류를 슬립 계수 안에 숨기는 셈**이라, 나중에 진짜
+        #   슬립(수 %)을 관측해도 0.53 이라는 큰 수에 묻혀 보이지 않게 됩니다.
+        #   ※ 모터 라벨/데이터시트의 감속비를 꼭 확인하십시오. 51 이 아니면
+        #     encoder_cpr 을 13*4*실제감속비 로 바꾸면 됩니다.
+        self.declare_parameter('encoder_cpr', 1404)
+        # ★ [v6] 바퀴 지름도 파라미터로 승격.
+        #   실측 ticks/m = 7049.4 인데 코드 가정(D=0.12, CPR=1404)은 3724.2 입니다.
+        #   비율 1.8929. 그런데 관계식이
+        #       ticks/m = CPR / (pi * D)
+        #   라서 **미지수 2개에 식 1개** 입니다. 주행 시험을 몇 번을 더 해도
+        #   이 둘을 분리할 수 없습니다(관측 불가). 자를 대고 재야만 갈립니다.
+        #     D=63.4mm & CPR=1404  <- 라벨(13CPR, 1:27, x4체배)과 정합
+        #     D=126.8mm & CPR=2808 <- 지름이 코드값에 가까움. 체배/감속 재확인 필요
+        #   두 조합은 ticks/m 이 완전히 동일하므로 오도메트리는 어느 쪽이든 맞습니다.
+        self.declare_parameter('wheel_diameter', 0.12)
+
+        # ══════════════════════════════════════════════════════════════
+        # ★★ [v7] max_wheel_speed — 명령 스케일. 펌웨어 lock 을 ROS 에서 상쇄
+        # ══════════════════════════════════════════════════════════════
+        #   [무엇인가]
+        #     "CAN 명령 9999 를 보냈을 때 바퀴 접지면이 내는 실제 속도[m/s]".
+        #     IK 는 바퀴 속도를 이 값으로 나눠 0~1 로 정규화한 뒤 9999 를 곱합니다.
+        #
+        #   [왜 0.95 가 틀렸나]
+        #     0.95 는 "150 RPM x pi x 0.12 = 0.942" 를 이론적으로 계산한 값입니다.
+        #     그런데 펌웨어의 속도 PID 는 ENCODER_CPR=1404 로 RPM 을 계산하는데
+        #     실제 CPR 이 약 2654 이므로, 펌웨어는 실제보다 1.89배 빠르다고 착각합니다.
+        #     PID 는 목표의 약 53% 지점에서 "달성했다"고 판단하고 멈춥니다.
+        #     => cmd_vel 0.30 을 줘도 로봇은 0.16~0.19 밖에 안 갑니다.
+        #
+        #   [왜 이걸 고치는 것이 encoder_scale 만큼 중요한가]
+        #     이 값을 실측 전달률에 맞춰 낮추면 명령과 실제가 일치하게 되어
+        #     **두 가지 문제가 동시에 사라집니다.**
+        #       (1) Nav2 가 명령한 속도를 로봇이 실제로 냅니다.
+        #       (2) 공분산 모델의 r_cmd = |cmd_vx - enc_vx| 항이 정상화됩니다.
+        #           지금은 cmd 와 enc 가 영구적으로 40~47% 벌어져 있어서, 모델이
+        #           이를 '상시 극심한 슬립'으로 오독해 Vx 분산을 최대 3.4배
+        #           부풀리고 있습니다. EKF 가 엔코더를 부당하게 불신하게 됩니다.
+        #
+        #   [기본값을 0.95 로 두는 이유 — 안전]
+        #     이 값을 실제보다 작게 잡으면 로봇이 명령보다 **빨리** 달립니다.
+        #     아직 측정 전이므로 보수적인 쪽(느린 쪽)인 0.95 를 유지합니다.
+        #     ACTION_GUIDE 의 [C-3] 절차로 30초면 실측할 수 있습니다.
+        #     실측 전달률 f 를 얻으면  max_wheel_speed = 0.95 x f  로 넣으십시오.
+        #     (예상 범위 0.50 ~ 0.64)
+        self.declare_parameter('max_wheel_speed', 0.95)
         self.declare_parameter('encoder_scale_left',  1.0)
         self.declare_parameter('encoder_scale_right', 1.0)
         self.declare_parameter('encoder_scale_y',   1.0)
@@ -753,6 +864,10 @@ class MotorNode(Node):
         #   이므로 0.003 까지도 채터링 없이 내려갈 수 있습니다.
         #   우선 0.005 로 쓰고, 잔류 쏠림이 3°대에서 더 안 줄면 0.003 으로 낮추십시오.
         self.declare_parameter('yaw_comp_deadband', 0.005) # [rad/s] 자이로 노이즈 무시 대역
+        # ★ [v8] 측정 저역통과 [Hz]. 0 = 비활성.
+        #   외란(곡률 드리프트)은 DC, 잡음은 수 Hz 이상 -> 2 Hz 가 최적 분리점.
+        #   현장에서 여전히 거칠면 1.5 로, 반응이 굼뜨면 3.0 으로.
+        self.declare_parameter('yaw_comp_lpf_hz',  2.0)
 
         gp = self.get_parameter
         channel          = gp('can_channel').value
@@ -763,6 +878,29 @@ class MotorNode(Node):
         odom_topic       = gp('odom_topic').value
         imu_topic        = gp('imu_topic').value
 
+        # ── ★ [v5] CPR 로부터 m/tick 과 틱 상한을 함께 유도 ─────────
+        #   두 값을 반드시 같은 CPR 에서 뽑아야 합니다. CPR 만 바꾸고 틱 상한을
+        #   그대로 두면, 상한이 실제 최대 틱수보다 낮아져 **정상 프레임을 노이즈로
+        #   폐기**하기 시작합니다. 조용히 오도메트리가 죽는 가장 나쁜 고장 형태입니다.
+        self._cpr = int(gp('encoder_cpr').value)
+        if self._cpr <= 0:
+            self.get_logger().error(f'encoder_cpr={self._cpr} 불가. 2652 로 강제합니다.')
+            self._cpr = 2652
+        self._wheel_d = float(gp('wheel_diameter').value)
+        if self._wheel_d <= 0.0:
+            self.get_logger().error(f'wheel_diameter={self._wheel_d} 불가. 0.12 로 강제.')
+            self._wheel_d = 0.12
+        _WC = math.pi * self._wheel_d
+        self._m_per_tick = _WC / self._cpr
+
+        self._max_wheel_v = float(gp('max_wheel_speed').value)
+        if not (0.05 <= self._max_wheel_v <= 5.0):
+            self.get_logger().error(
+                f'max_wheel_speed={self._max_wheel_v} 범위 밖. 0.95 로 강제합니다.')
+            self._max_wheel_v = 0.95
+        # 최대 요레이트는 최대 바퀴속도에서 파생됩니다(지레팔 _MECANUM_L).
+        # 독립 상수로 두면 둘이 어긋나 IK 정규화가 vx 를 갉아먹습니다.
+        self._max_wz_cmd = self._max_wheel_v / _MECANUM_L
         self._k_left    = float(gp('encoder_scale_left').value)
         self._k_right   = float(gp('encoder_scale_right').value)
         self._scale_y   = float(gp('encoder_scale_y').value)
@@ -776,6 +914,19 @@ class MotorNode(Node):
             self._k_left = self._k_right = 1.0
         self._scale_x = 0.5 * (self._k_left + self._k_right)          # 파생: 평균
         self._balance = self._k_right / self._k_left                  # 파생: 밸런스
+
+        # ── ★ [v7] 틱 상한을 '스케일 적용 후 실효 틱밀도' 로 계산 ─────
+        #   [왜 스케일을 반드시 넣어야 하는가]
+        #     실효 틱밀도 = 1/(m_per_tick x scale) = 실제로 미터당 몇 틱이 오는가.
+        #     스케일 0.529 는 "코드가 믿는 것보다 1.89배 많은 틱이 온다"는 뜻입니다.
+        #     스케일을 빼고 CPR 만으로 상한을 잡으면 상한이 실제의 절반이 되어
+        #     고속 주행 시 **정상 프레임을 노이즈로 폐기**합니다.
+        #     오도메트리가 경고 한 줄 없이 조용히 죽는 가장 나쁜 고장 형태입니다.
+        _frame_dt = 0.02                       # STM32 피드백 20 ms
+        _ticks_per_m_eff = 1.0 / (self._m_per_tick * self._scale_x)
+        # 기계적 최대 속도(146 RPM 사양) 기준. 명령 스케일과 무관하게 물리 상한을 씁니다.
+        _v_mech_max = (146.0 / 60.0) * _WC
+        self._max_ticks = int(2.0 * _v_mech_max * _ticks_per_m_eff * _frame_dt)
 
         self._cmd_timeout   = float(gp('cmd_timeout').value)
         self._imu_timeout   = float(gp('imu_timeout').value)
@@ -814,8 +965,28 @@ class MotorNode(Node):
             ki=float(gp('yaw_comp_ki').value),
             limit=float(gp('yaw_comp_limit').value),
             deadband=float(gp('yaw_comp_deadband').value),
+            lpf_hz=float(gp('yaw_comp_lpf_hz').value),
         )
         self._yaw_comp_last_t: float | None = None
+
+        # ══════════════════════════════════════════════════════════════
+        # ★★ [v4 최중요] 런타임 파라미터 반영 콜백
+        # ══════════════════════════════════════════════════════════════
+        #   [무엇이 잘못돼 있었나 — 제 설계 실수입니다]
+        #     위의 yaw_comp_* 값들은 __init__ 에서 **딱 한 번** 읽혔습니다.
+        #     그래서 `ros2 param set /motor_node yaw_comp_kp 15.0` 을 아무리 해도
+        #     내부의 self._yaw_comp.kp 는 1.0 그대로였습니다.
+        #     ros2 param set 은 "성공"을 출력합니다 — 값이 파라미터 서버에는
+        #     실제로 저장되기 때문입니다. 다만 아무도 다시 읽지 않았을 뿐입니다.
+        #     **조용한 실패(silent failure)** 였고, 그래서 Kp 를 4→5→6→10→15 로
+        #     올려도 로봇 거동이 수동 주행과 '완전히 똑같았던' 것입니다.
+        #     게인이 부족했던 게 아니라, 루프가 애초에 닫힌 적이 없습니다.
+        #
+        #   이제 아래 콜백이 등록되어 param set 이 즉시 반영됩니다.
+        #   yaw_comp_enable 도 런타임 토글이 되므로, 진동이 나면 로봇을 세우지 않고
+        #   그 자리에서 false 로 되돌릴 수 있습니다.
+        self.add_on_set_parameters_callback(self._on_set_params)
+
         if self._yaw_comp_on:
             self.get_logger().warn(
                 f'[요레이트 보상기 ON] kp={self._yaw_comp.kp} ki={self._yaw_comp.ki} '
@@ -848,6 +1019,22 @@ class MotorNode(Node):
         # [Stage 1e] CAN 건강 상태 카운터
         self._can_err_count = 0
         self._bad_tick_count = 0
+        # ── ★ [v4] CAN TX 통계 ───────────────────────────────────────
+        self._tx_ok = 0
+        self._tx_fail = 0
+        self._tx_fail_run = 0        # 연속 실패 횟수
+        self._tx_enobufs = 0         # ENOBUFS(105) 만 따로
+        self._tx_other_err = 0
+        self._tx_last_err = ''
+        self._tx_blocked = False
+        self._tx_fail_limit = 10     # 이만큼 연속 실패하면 '두절'로 승격 (50Hz 기준 0.2s)
+        self._tx_report_t = time.monotonic()
+        self._tx_report_period = 5.0
+        self._tx_fail_mark = 0
+        self._tx_ok_mark = 0
+        self._state_cache = 'unknown'
+        self._state_t = 0.0
+        self._can_channel = 'can0'
         self._bus_off_seen = False
         self._can_err_by_class: dict = {}
 
@@ -862,6 +1049,7 @@ class MotorNode(Node):
 
         # ── CAN 버스 ─────────────────────────────────────────────────
         try:
+            self._can_channel = channel
             self._bus = can.interface.Bus(channel=channel, bustype='socketcan',
                                           receive_own_messages=False)
             # ★ [Stage 1e] 커널 레벨 하드웨어 필터.
@@ -904,11 +1092,25 @@ class MotorNode(Node):
 
         self.get_logger().info(
             f'MotorNode(Mecanum) 준비 완료. Odom -> {odom_topic}, IMU <- {imu_topic}\n'
+            f'  max_wheel_speed={self._max_wheel_v:.4f} m/s '
+            f'(max_wz {self._max_wz_cmd:.3f} rad/s)\n'
+            f'  encoder_cpr={self._cpr}  wheel_d={self._wheel_d*1000:.1f}mm '
+            f'-> {self._m_per_tick*1e6:.3f} um/tick ({1.0/self._m_per_tick:.0f} ticks/m), '
+            f'틱상한 ±{self._max_ticks}/frame\n'
             f'  scale_left={self._k_left:.4f}  scale_right={self._k_right:.4f}  '
             f'(평균 {self._scale_x:.4f} / 밸런스 {self._balance:.4f})\n'
             f'  slip model: 1/(1 + {self._slip_a:.4f} + {self._slip_b:.4f}·v)'
             f'{"  [비활성]" if self._slip_b == 0.0 else ""}\n'
             f'  yaw source = {"IMU 자이로" if self._use_gyro_yaw else "엔코더(권장하지 않음)"}')
+        # ★ [v7] 명령 스케일 미보정 경고
+        if abs(self._max_wheel_v - 0.95) < 1e-6:
+            self.get_logger().warn(
+                '[명령 스케일 미보정] max_wheel_speed = 0.95 (이론값) 입니다.\n'
+                '  펌웨어 속도 PID 가 ENCODER_CPR 불일치로 목표의 약 53% 에서 멈추므로,\n'
+                '  cmd_vel 로 준 속도의 절반 정도밖에 나오지 않습니다.\n'
+                '  부작용: (1) Nav2 가 명령한 속도 미달  (2) 공분산 모델의 r_cmd 항이\n'
+                '  상시 슬립으로 오독되어 Vx 분산이 최대 3.4배 부풀려집니다.\n'
+                '  -> 실측 전달률 f 를 재서  max_wheel_speed = 0.95 x f  로 넣으십시오.')
         if abs(self._scale_x - 1.0) < 1e-9:
             self.get_logger().warn(
                 '[캘리브레이션] encoder_scale_left/right = 1.0 (무보정) 입니다. '
@@ -934,6 +1136,126 @@ class MotorNode(Node):
     # ══════════════════════════════════════════════════════════════════
     # IMU
     # ══════════════════════════════════════════════════════════════════
+
+    def _on_set_params(self, params) -> SetParametersResult:
+        """
+        `ros2 param set` 을 실시간으로 반영합니다.
+
+        주행 중 튜닝을 전제로 하므로 검증을 먼저 합니다. 잘못된 값 하나가
+        움직이는 로봇에 그대로 들어가면 안 됩니다. 하나라도 부적합하면
+        **전부 거부**합니다(원자적 적용). 부분 적용된 게인 세트가 가장 위험합니다.
+        """
+        pending = {}
+        for p in params:
+            n, v = p.name, p.value
+            try:
+                if n == 'yaw_comp_enable':
+                    pending[n] = bool(v)
+                elif n in ('yaw_comp_kp', 'yaw_comp_ki'):
+                    fv = float(v)
+                    if fv < 0.0 or fv > 100.0:
+                        return SetParametersResult(
+                            successful=False,
+                            reason=f'{n}={fv} 범위 밖 (0~100). 거부합니다.')
+                    pending[n] = fv
+                elif n == 'yaw_comp_limit':
+                    fv = float(v)
+                    # 상한을 _MAX_WZ 로 묶습니다. 보상기가 로봇의 물리적 최대
+                    # 요레이트를 넘는 명령을 내면 IK 정규화가 vx 를 깎아버려
+                    # "보상하려다 직진을 잃는" 상태가 됩니다.
+                    if not (0.0 < fv <= self._max_wz_cmd):
+                        return SetParametersResult(
+                            successful=False,
+                            reason=f'yaw_comp_limit={fv} 는 (0, {self._max_wz_cmd:.3f}] 밖입니다.')
+                    pending[n] = fv
+                elif n == 'yaw_comp_deadband':
+                    fv = float(v)
+                    if fv < 0.0 or fv > 0.5:
+                        return SetParametersResult(
+                            successful=False, reason=f'yaw_comp_deadband={fv} 범위 밖.')
+                    pending[n] = fv
+                elif n == 'yaw_comp_lpf_hz':
+                    fv = float(v)
+                    # 상한은 제어주기(50Hz)의 Nyquist. 그 위는 필터 의미가 없습니다.
+                    if not (0.0 <= fv <= 25.0):
+                        return SetParametersResult(
+                            successful=False,
+                            reason=f'yaw_comp_lpf_hz={fv} 는 0~25 Hz 여야 합니다.')
+                    pending[n] = fv
+                elif n == 'max_wheel_speed':
+                    fv = float(v)
+                    if not (0.05 <= fv <= 5.0):
+                        return SetParametersResult(
+                            successful=False,
+                            reason=f'max_wheel_speed={fv} 는 0.05~5.0 범위여야 합니다.')
+                    # 기계적 상한(146 RPM x pi x D)을 넘으면 명령이 물리적으로 도달 불가
+                    v_mech = (146.0 / 60.0) * math.pi * self._wheel_d
+                    if fv > v_mech * 1.05:
+                        return SetParametersResult(
+                            successful=False,
+                            reason=f'max_wheel_speed={fv} 가 기계적 상한 {v_mech:.3f} m/s 초과.')
+                    pending[n] = fv
+                elif n == 'imu_timeout':
+                    fv = float(v)
+                    if not (0.02 <= fv <= 2.0):
+                        return SetParametersResult(
+                            successful=False, reason=f'imu_timeout={fv} 범위 밖 (0.02~2.0).')
+                    pending[n] = fv
+            except (TypeError, ValueError) as exc:
+                return SetParametersResult(successful=False, reason=f'{n}: {exc}')
+
+        if not pending:
+            return SetParametersResult(successful=True)
+
+        # ── 검증 통과 후 일괄 적용 ──────────────────────────────────
+        for n, v in pending.items():
+            if n == 'yaw_comp_enable':
+                was, self._yaw_comp_on = self._yaw_comp_on, v
+                if was != v:
+                    # 켜고 끌 때 적분항을 반드시 비웁니다. 남은 적분값이
+                    # 재활성 순간 그대로 출력으로 튀어나오면 킥이 발생합니다.
+                    self._yaw_comp.reset()
+                    self._yaw_comp_last_t = None
+            elif n == 'yaw_comp_kp':
+                self._yaw_comp.kp = v
+            elif n == 'yaw_comp_ki':
+                # Ki 를 바꾸면 out = ki*integral 항이 불연속으로 점프합니다.
+                # 적분 '기여분'(ki*integral)을 보존하도록 integral 을 재조정해
+                # 출력이 연속이 되게 만듭니다. 주행 중 튜닝의 필수 처리입니다.
+                old_ki = self._yaw_comp.ki
+                contrib = old_ki * self._yaw_comp._integral
+                self._yaw_comp.ki = v
+                self._yaw_comp._integral = (contrib / v) if v > 1e-9 else 0.0
+            elif n == 'yaw_comp_limit':
+                self._yaw_comp.limit = v
+            elif n == 'yaw_comp_deadband':
+                self._yaw_comp.deadband = v
+            elif n == 'yaw_comp_lpf_hz':
+                self._yaw_comp.lpf_hz = v
+            elif n == 'max_wheel_speed':
+                old_m, self._max_wheel_v = self._max_wheel_v, v
+                self._max_wz_cmd = self._max_wheel_v / _MECANUM_L
+                # ★★ 반드시 함께 알려야 하는 결합
+                #   보상기 출력 comp[rad/s] -> 바퀴차속 comp*L -> /M -> CAN 이므로
+                #   루프이득이 1/M 에 비례합니다. M 을 내리면 실효 Kp 가 올라갑니다.
+                #   (M 0.95 -> 0.6251 로 내렸을 때 Kp=2.0 이 3.04 상당이 되어
+                #    잡았던 진동이 재발한 전례가 있습니다)
+                if abs(old_m - v) > 1e-6:
+                    r = old_m / v
+                    self.get_logger().warn(
+                        f'[루프이득 변경 경고] max_wheel_speed {old_m:.4f} -> {v:.4f}\n'
+                        f'  요레이트 보상기 실효 이득이 {r:.3f}배 됩니다.\n'
+                        f'  현재 kp={self._yaw_comp.kp} ki={self._yaw_comp.ki} 를 유지하려면 '
+                        f'kp={self._yaw_comp.kp/r:.2f} ki={self._yaw_comp.ki/r:.2f} 로 나누십시오.')
+            elif n == 'imu_timeout':
+                self._imu_timeout = v
+
+        self.get_logger().warn(
+            f'[요레이트 보상기 갱신] enable={self._yaw_comp_on} '
+            f'kp={self._yaw_comp.kp} ki={self._yaw_comp.ki} '
+            f'limit=±{self._yaw_comp.limit} deadband={self._yaw_comp.deadband} '
+            f'lpf={self._yaw_comp.lpf_hz}Hz')
+        return SetParametersResult(successful=True)
 
     def _imu_cb(self, msg: Imu) -> None:
         with self._imu_lock:
@@ -982,7 +1304,7 @@ class MotorNode(Node):
             # [3중 방어]
             #   1) is_error_frame 검사 (아래)
             #   2) DLC 를 정확히 4 로 요구  (에러 프레임은 항상 8 이므로 이중 차단)
-            #   3) 물리적으로 불가능한 틱 수 폐기 (아래 _MAX_TICKS_PER_FRAME)
+            #   3) 물리적으로 불가능한 틱 수 폐기 (self._max_ticks, CPR 에서 자동 유도)
             # ══════════════════════════════════════════════════════════
             if msg.is_error_frame:
                 self._on_can_error(msg)
@@ -1003,11 +1325,11 @@ class MotorNode(Node):
             # 방어 3: 물리적으로 불가능한 틱 수 폐기
             #   최대 150 RPM = 2.5 rev/s = 3510 ticks/s. 20ms 프레임이면 70틱.
             #   여유 2배(140)를 넘으면 노이즈이거나 프레임 유실로 인한 누적입니다.
-            if abs(left_ticks) > _MAX_TICKS_PER_FRAME or abs(right_ticks) > _MAX_TICKS_PER_FRAME:
+            if abs(left_ticks) > self._max_ticks or abs(right_ticks) > self._max_ticks:
                 self._bad_tick_count += 1
                 self.get_logger().warn(
                     f'[CAN] 비정상 틱 폐기 L={left_ticks} R={right_ticks} '
-                    f'(한계 ±{_MAX_TICKS_PER_FRAME}, 누적 {self._bad_tick_count})',
+                    f'(한계 ±{self._max_ticks}, 누적 {self._bad_tick_count})',
                     throttle_duration_sec=2.0)
                 return
             right_ticks = -right_ticks
@@ -1034,8 +1356,8 @@ class MotorNode(Node):
             # ── 원시 기하 계산 : ★ 스케일을 '바퀴 단위'로 먼저 적용 ──────
             #    오차가 발생하는 지점(바퀴 접지면)에서 보정하는 것이 구조적으로 옳습니다.
             #    평균에 한 번 곱하는 방식은 좌우 비대칭을 표현할 수 없습니다.
-            raw_left  = lt * _METER_PER_TICK
-            raw_right = rt * _METER_PER_TICK
+            raw_left  = lt * self._m_per_tick
+            raw_right = rt * self._m_per_tick
 
             # ★ [Stage 1c] 속도 의존 슬립 보정
             #   v_raw = 스케일 적용 '전' 바퀴 표면속도. 스케일된 값을 쓰면 순환 참조가 됩니다.
@@ -1246,6 +1568,17 @@ class MotorNode(Node):
                 imu_wz_now = self._imu_wz
             moving = (abs(msg.linear.x) > 0.02 or abs(msg.linear.y) > 0.02
                       or abs(msg.angular.z) > 0.02)
+            # ★ [v4] 보상기가 '켜져 있는데도 출력이 0' 인 두 가지 이유를
+            #   침묵시키지 않고 반드시 말하게 합니다. 이게 없으면 사용자는
+            #   "게인이 부족한가" 하고 Kp 만 계속 올리게 됩니다 — 실제로 그런
+            #   일이 있었습니다. 원인은 게인이 아니라 비활성이었습니다.
+            if not imu_ok:
+                self.get_logger().error(
+                    f'[요보상 비활성] IMU 가 {now - self._imu_stamp:.2f}s 동안 없습니다 '
+                    f'(임계 {self._imu_timeout:.2f}s). 보상 출력 = 0.\n'
+                    f'  -> 구독 토픽을 확인하십시오. 현재 IMU 주기가 20~35 Hz 로 '
+                    f'흔들리므로 imu_timeout 을 0.3~0.5 로 올리는 것도 방법입니다.',
+                    throttle_duration_sec=3.0)
             comp = self._yaw_comp.update(msg.angular.z, imu_wz_now, dt_c,
                                          active=(imu_ok and moving))
             wz_eff = msg.angular.z + comp
@@ -1255,8 +1588,10 @@ class MotorNode(Node):
         v_rl_ms = msg.linear.x + msg.linear.y - (wz_eff * _MECANUM_L)
         v_rr_ms = msg.linear.x - msg.linear.y + (wz_eff * _MECANUM_L)
 
-        v_fl, v_fr = v_fl_ms / _MAX_VX, v_fr_ms / _MAX_VX
-        v_rl, v_rr = v_rl_ms / _MAX_VX, v_rr_ms / _MAX_VX
+        # ★ [v7] 모듈 상수 _MAX_VX 대신 실측 기반 파라미터를 씁니다.
+        _M = self._max_wheel_v
+        v_fl, v_fr = v_fl_ms / _M, v_fr_ms / _M
+        v_rl, v_rr = v_rl_ms / _M, v_rr_ms / _M
 
         max_val = max(abs(v_fl), abs(v_fr), abs(v_rl), abs(v_rr), 1.0)
         v_fl, v_fr, v_rl, v_rr = v_fl / max_val, v_fr / max_val, v_rl / max_val, v_rr / max_val
@@ -1277,7 +1612,23 @@ class MotorNode(Node):
             # [Stage 1d] 하트비트가 재송신할 값 보관
             self._last_wheel_can = (fl_can, fr_can, rl_can, rr_can)
 
-        self._send_can(fl_can, fr_can, rl_can, rr_can)
+        # ★ [v4] 여기서 직접 송신하지 않습니다 — 단일 송신자(single writer) 원칙.
+        #
+        #   [기존 구조의 문제]
+        #     하트비트 타이머(50Hz) + cmd_vel 콜백(50Hz) 이 각각 _send_can 을
+        #     호출해 실제 버스 부하가 100 Hz 였습니다. 그런데 두 프레임의 '내용'은
+        #     같습니다 — 하트비트는 방금 콜백이 보낸 값을 그대로 다시 보냅니다.
+        #     즉 **버스 트래픽의 절반이 완전한 중복**이었습니다.
+        #     퍼블리셔가 하나 더 붙으면(키보드 + 크루즈 동시 실행) 150 Hz 가 됩니다.
+        #     버스가 EMI 로 약해진 상황에서 이 중복은 그대로 ENOBUFS 압력이 됩니다.
+        #
+        #   [바뀐 구조]
+        #     콜백은 '최신 목표값'만 갱신하고, 송신은 타이머가 독점합니다.
+        #     - 버스 부하가 cmd_vel 퍼블리셔 수와 무관하게 can_tx_hz 로 고정됩니다.
+        #     - _can_lock 경합이 사라집니다.
+        #     - 지연은 최대 1/can_tx_hz (50Hz -> 20ms). 요레이트 내루프의
+        #       대역폭이 1~2 Hz 이므로 위상 여유에 영향이 없습니다.
+        #     - 정지/E-Stop 은 예외로 여전히 즉시 송신합니다(안전 경로).
 
     def _zero_cmd(self) -> None:
         with self._cmd_lock:
@@ -1339,17 +1690,173 @@ class MotorNode(Node):
     # ══════════════════════════════════════════════════════════════════
 
     def _send_can(self, fl: int, fr: int, rl: int, rr: int) -> None:
+        """
+        ★ v4 — ENOBUFS(errno 105) 대응 재작성.
+
+        [왜 ENOBUFS 가 나는가]
+          SocketCAN 인터페이스의 기본 txqueuelen 은 1000 이 아니라 **10** 입니다.
+          500 kbps 에서 8바이트 프레임 1개는 약 190 us -> 초당 5000 프레임이
+          물리적으로 가능합니다. 우리는 100 Hz 도 안 쓰므로 대역폭 문제가 아닙니다.
+          큐가 차는 유일한 경로는 "큐가 비워지지 않는 것" 뿐입니다:
+            - BUS-OFF   : 컨트롤러가 TX 를 완전히 차단. restart-ms 까지 대기.
+            - ACK 없음  : 수신 확인이 없으면 컨트롤러가 무한 재전송, 메일박스 점유.
+            - ERROR-PASSIVE : 재전송 지연 누적.
+          Kp 를 올리면 PWM 변화율(di/dt)이 커져 모터선 EMI 가 강해지고,
+          그게 CAN 비트 에러 -> TEC 상승 -> BUS-OFF 로 이어집니다.
+          즉 "소프트웨어 게인이 방아쇠를 당기고, 하드웨어가 총알을 쏩니다."
+
+        [왜 txqueuelen 을 키우면 안 되는가 — 인터넷 조언 주의]
+          검색하면 대부분 `ip link set can0 txqueuelen 1000` 을 시킵니다.
+          제어 명령에는 **절대 하면 안 됩니다.** 큐 1000개 = 최대 10초치 낡은
+          속도 명령이 쌓인다는 뜻이고, 버스가 복구되는 순간 로봇이 10초 전
+          명령들을 순서대로 실행합니다. 그게 바로 우리가 Stage 1d 내내 막아온
+          '폭주'입니다. 속도 명령은 최신값만 의미가 있습니다(latest-value-wins).
+          따라서 정답은 "큐를 키운다"가 아니라 **"큐에 넣지 말고 버린다"** 입니다.
+
+        [설계]
+          - timeout=0.0 : 논블로킹. 실패하면 즉시 포기하고 다음 주기의 '새' 값을 보냄.
+            (기존 0.05s 블로킹은 20ms 타이머 안에서 50ms 를 태워 실행기를 밀리게
+             만들었습니다. 에러 로그 '폭주'의 실제 원인 중 하나입니다.)
+          - 실패는 조용히 세고, 요약만 주기적으로 1줄 보고.
+          - 연속 실패가 임계를 넘으면 통신 두절로 승격 -> 안전 계층에 알림.
+        """
         data = struct.pack('>hhhh', fl, fr, rl, rr)
         try:
-            # 하트비트 타이머와 cmd_vel 콜백이 동시에 들어올 수 있으므로 직렬화
+            # 하트비트 타이머와 E-Stop 경로가 동시에 들어올 수 있으므로 직렬화
             with self._can_lock:
                 self._bus.send(can.Message(arbitration_id=self._can_id,
                                            data=data, is_extended_id=False),
-                               timeout=0.05)   # ★ 블로킹 상한. 버스 이상 시 노드가 멎지 않게
+                               timeout=0.0)   # ★ 논블로킹. 실패 = 즉시 폐기.
+            self._tx_ok += 1
+            self._tx_fail_run = 0
+            if self._tx_blocked:
+                self._tx_blocked = False
+                self.get_logger().info(
+                    f'[CAN TX 복구] 송신 재개 (누적 실패 {self._tx_fail}회).')
+            return
         except can.CanError as exc:
-            # 여기서 예외를 삼키는 것이 맞습니다. 송신 실패는 곧 '명령 부재'이고,
-            # STM32 워치독이 500ms 뒤 알아서 모터를 세웁니다.
-            self.get_logger().error(f'[CAN TX ERROR] {exc}', throttle_duration_sec=1.0)
+            # ENOBUFS 인지 아닌지를 구분합니다. 원인도 대처도 다릅니다.
+            #   ENOBUFS(105) -> 큐 포화. 버스가 죽어 있다는 신호. 재시도 무의미.
+            #   그 외          -> 소켓/드라이버 이상. 동일하게 폐기하되 원문을 남김.
+            no_buf = (getattr(exc, 'error_code', None) == errno.ENOBUFS
+                      or 'buffer space' in str(exc).lower()
+                      or '105' in str(exc))
+            self._tx_fail += 1
+            self._tx_fail_run += 1
+            if no_buf:
+                self._tx_enobufs += 1
+            else:
+                self._tx_other_err += 1
+                self._tx_last_err = str(exc)
+
+            # 연속 실패가 이어지면 STM32 는 사실상 아무 명령도 못 받는 상태입니다.
+            # STM32 의 CMD_TIMEOUT_MS(500ms) 가 곧 모터를 세우겠지만, ROS 쪽도
+            # 같은 사실을 알아야 Nav2/UI 가 대응할 수 있습니다.
+            if self._tx_fail_run >= self._tx_fail_limit and not self._tx_blocked:
+                self._tx_blocked = True
+                self.get_logger().error(
+                    f'[CAN TX 두절] {self._tx_fail_run}회 연속 송신 실패. '
+                    f'STM32 는 지금 명령을 받지 못하고 있습니다.\n'
+                    f'  -> `ip -details -statistics link show can0` 으로 '
+                    f'bus-off / restart 카운터를 확인하십시오.')
+                self._publish_comm_lost(True)
+            return
+
+    def _can_state(self) -> str:
+        """
+        커널이 보는 CAN 컨트롤러 상태를 읽습니다. (1초 캐시)
+
+        [왜 필요한가]
+          ENOBUFS 만 보고는 '큐가 찼다'까지만 알 수 있고, **왜** 안 비워지는지를
+          모릅니다. 원인이 BUS-OFF 인지 ERROR-PASSIVE 인지에 따라 조치가 완전히
+          다릅니다:
+            BUS-OFF       -> restart-ms 가 0 이면 **영원히 자동복구 안 됨.**
+                             ip link down/up 또는 restart-ms 설정이 답.
+            ERROR-PASSIVE -> 상대가 ACK 를 안 주는 중. 배선/상대 노드 문제.
+            ERROR-ACTIVE  -> 버스는 멀쩡. 순수 송신 주기 과다(우리 쪽 문제).
+          이 한 글자가 진단 시간을 몇 시간 줄여 줍니다.
+        """
+        # ★ 이 함수는 50 Hz 로 도는 _publish_can_health 에서도 불립니다.
+        #   subprocess 를 매번 띄우면 그 자체가 부하가 되므로 1초 캐시를 둡니다.
+        now = time.monotonic()
+        if now - self._state_t < 1.0:
+            return self._state_cache
+        self._state_t = now
+
+        # (1) python-can API. 버전에 따라 없거나 NotImplementedError 를 냅니다.
+        try:
+            st = self._bus.state
+            m = {can.BusState.ACTIVE:  'ERROR-ACTIVE',
+                 can.BusState.PASSIVE: 'ERROR-PASSIVE',
+                 can.BusState.ERROR:   'BUS-OFF'}
+            if st in m:
+                self._state_cache = m[st]
+                return self._state_cache
+        except Exception:
+            pass
+
+        # (2) ip 명령 파싱. 버전 무관하고 root 도 필요 없어 이쪽이 더 믿을 만합니다.
+        try:
+            out = subprocess.run(
+                ['ip', '-details', 'link', 'show', self._can_channel],
+                capture_output=True, text=True, timeout=1.0).stdout.upper()
+            for k in ('BUS-OFF', 'ERROR-PASSIVE', 'ERROR-WARNING',
+                      'ERROR-ACTIVE', 'STOPPED', 'SLEEPING'):
+                if k in out:
+                    self._state_cache = k
+                    return self._state_cache
+        except Exception:
+            pass
+
+        self._state_cache = 'unknown'
+        return self._state_cache
+
+    def _report_tx_health(self) -> None:
+        """
+        TX 실패를 '건별 로그'가 아니라 '구간 요약'으로 보고합니다.
+
+        rclpy 의 throttle_duration_sec 는 호출 위치 기준이라, MultiThreadedExecutor
+        에서 타이머 스레드와 Notifier 스레드가 동시에 같은 줄을 때리면 새어나갑니다.
+        (사용자가 본 '에러 폭주'가 이 현상입니다.) 그래서 스로틀에 의존하지 않고
+        직접 집계해 1줄로 보고합니다. 숫자가 나오면 심각도까지 같이 보입니다.
+        """
+        now = time.monotonic()
+        if now - self._tx_report_t < self._tx_report_period:
+            return
+        span = now - self._tx_report_t
+        self._tx_report_t = now
+        d_fail = self._tx_fail - self._tx_fail_mark
+        d_ok   = self._tx_ok   - self._tx_ok_mark
+        self._tx_fail_mark, self._tx_ok_mark = self._tx_fail, self._tx_ok
+        if d_fail == 0:
+            return
+        total = d_fail + d_ok
+        pct = 100.0 * d_fail / max(total, 1)
+        state = self._can_state()
+        # 100% 유실 + ENOBUFS 단독 = 큐가 아예 안 비워지는 상태.
+        # 원인별 조치를 로그에 바로 붙여 줍니다.
+        hint = ''
+        if pct >= 99.0:
+            if state == 'BUS-OFF':
+                hint = ('\n  ★ BUS-OFF 입니다. restart-ms 가 0 이면 자동 복구되지 않습니다.\n'
+                        '     sudo ip link set can0 down\n'
+                        '     sudo ip link set can0 type can bitrate 500000 restart-ms 100 '
+                        'berr-reporting on\n'
+                        '     sudo ip link set can0 up')
+            elif state == 'ERROR-PASSIVE':
+                hint = ('\n  ★ ERROR-PASSIVE 입니다. 우리 프레임을 아무도 ACK 하지 않고 있습니다.\n'
+                        '     STM32 전원/리셋, CAN_H·CAN_L 결선, 120옴 종단, 공통 GND 를 확인하십시오.')
+            elif state == 'ERROR-ACTIVE':
+                hint = ('\n  ★ 버스는 ERROR-ACTIVE(정상) 인데 100% 유실입니다.\n'
+                        '     드라이버/소켓 이상이 의심됩니다. candump can0 로 수신이 되는지 보십시오.')
+            else:
+                hint = ('\n  ★ 상태 조회 실패. `ip -details -statistics link show can0` 로 직접 확인하십시오.')
+        self.get_logger().error(
+            f'[CAN TX] 최근 {span:.0f}초 송신 실패 {d_fail}회 / 시도 {total}회 '
+            f'({pct:.1f}% 유실)  ENOBUFS 누적={self._tx_enobufs} '
+            f'기타={self._tx_other_err}  버스상태={state}'
+            + (f'  마지막 기타오류: {self._tx_last_err}' if self._tx_other_err else '')
+            + hint)
 
     # ══════════════════════════════════════════════════════════════════
     # [Stage 1d] CAN 하트비트 / 통신 두절 안전장치
@@ -1394,8 +1901,11 @@ class MotorNode(Node):
             self._comm_lost = False
             self.get_logger().info('[통신 복구] cmd_vel 수신 재개.')
         self._send_can(*wheels)
-        self._publish_comm_lost(False)
+        # ★ [v4] TX 두절 중이면 comm_lost 를 유지해야 합니다. _send_can 이
+        #   이미 두절을 선언했는데 여기서 False 로 덮으면 진실이 지워집니다.
+        self._publish_comm_lost(self._tx_blocked)
         self._publish_can_health()
+        self._report_tx_health()
 
     def _publish_comm_lost(self, lost: bool) -> None:
         m = Bool()
@@ -1436,7 +1946,17 @@ class MotorNode(Node):
             throttle_duration_sec=2.0)
 
     def _publish_can_health(self) -> None:
-        """0:err_total 1:bad_tick 2:bus_off 3:ACK오류 4:BUSERROR 5:RESTARTED"""
+        """
+        0:err_total 1:bad_tick 2:bus_off 3:ACK오류 4:BUSERROR 5:RESTARTED
+        ★ v4 추가
+        6:tx_fail_total 7:tx_enobufs 8:tx_other_err 9:tx_fail_run(연속)
+        10:tx_ok_total 11:tx_blocked(0/1)
+
+        [현장 판독법]
+          7 만 오르고 3,5 는 0      -> 순수 소프트웨어 큐 포화 (송신 주기 과다)
+          3(ACK), 5(RESTARTED) 동반 -> 하드웨어/EMI. bus-off 반복이 진짜 원인.
+          6 이 오르는데 11 이 0     -> 산발적 유실. 하트비트가 메워주고 있음.
+        """
         m = Float32MultiArray()
         m.data = [
             float(self._can_err_count),
@@ -1445,6 +1965,15 @@ class MotorNode(Node):
             float(self._can_err_by_class.get('ACK', 0)),
             float(self._can_err_by_class.get('BUSERROR', 0)),
             float(self._can_err_by_class.get('RESTARTED', 0)),
+            float(self._tx_fail),
+            float(self._tx_enobufs),
+            float(self._tx_other_err),
+            float(self._tx_fail_run),
+            float(self._tx_ok),
+            1.0 if self._tx_blocked else 0.0,
+            # 12: 버스상태 0=ERROR-ACTIVE 1=ERROR-PASSIVE 2=BUS-OFF -1=조회실패
+            {'ERROR-ACTIVE': 0.0, 'ERROR-PASSIVE': 1.0,
+             'BUS-OFF': 2.0}.get(self._can_state(), -1.0),
         ]
         self._pub_can_health.publish(m)
 

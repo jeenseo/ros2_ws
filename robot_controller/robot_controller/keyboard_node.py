@@ -83,7 +83,11 @@ class KeyboardNode(Node):
         self.declare_parameter('normal_speed',    SPEED_NORMAL)
         self.declare_parameter('boost_speed',     SPEED_BOOST)
         self.declare_parameter('overdrive_speed', SPEED_OVERDRIVE)
-        self.declare_parameter('publish_hz',      20.0)
+        # ★ [v4] 20 -> 50 Hz. 유예를 0.05 로 줄여도 발행 주기가 50ms 면 정지 지연이
+        #   여전히 최대 50ms 추가됩니다. 발행을 50 Hz 로 올려 20ms 로 줄입니다.
+        #   총 정지 지연 = key_grace(50ms) + 발행주기(20ms) + motor_node 하트비트(20ms)
+        #                = 최악 90ms, 통상 60ms.
+        self.declare_parameter('publish_hz',      50.0)
         # 스레드가 이 시간 넘게 살아있음을 알리지 않으면 '사망'으로 간주
         self.declare_parameter('input_watchdog',  0.5)
         # ★ [수정] 키를 뗀 것으로 판정하기까지의 유예 0.15 → 0.60
@@ -102,7 +106,43 @@ class KeyboardNode(Node):
         #
         #   ※ 캘리브레이션 주행에는 키보드를 쓰지 마십시오. cruise_node.py 를 쓰면
         #     가감속 프로파일이 매번 동일하게 재현됩니다.
-        self.declare_parameter('key_release_grace', 0.60)
+        #
+        # ★★ [v3] 적응형 유예 — 단일 값의 딜레마를 해소합니다
+        #   단일 유예값은 다음 두 요구를 동시에 만족할 수 없습니다.
+        #     "누르고 있을 때 안 멈칫" -> 유예가 auto-repeat 초기지연(0.5s)보다 길어야 함
+        #     "떼면 바로 정지"        -> 유예가 짧아야 함
+        #   해결: auto-repeat 연타가 시작됐는지를 감지해서 유예를 전환합니다.
+        #     t=0.00  첫 문자        -> 긴 유예(0.60) 적용  (침묵 구간을 견딤)
+        #     t=0.50  연타 시작 감지 -> 짧은 유예(0.12)로 전환
+        #     t=3.00  키 뗌          -> 0.12초 뒤 정지     ← 빠름
+        #   짧게 톡 누르는 경우(연타 전 릴리스)만 0.6초 관성이 남는데,
+        #   이건 '살짝 밀기' 용도라 오히려 자연스럽습니다.
+        self.declare_parameter('key_grace_initial', 0.60)  # 연타 시작 전
+        self.declare_parameter('key_grace_repeat',  0.12)  # 연타 중 (키 뗀 뒤 정지까지)
+        self.declare_parameter('key_repeat_detect', 0.20)  # 이 간격 이내면 연타로 판정
+
+        # ══════════════════════════════════════════════════════════
+        # ★★ [v4] 즉시 정지 모드 (기본값)
+        # ══════════════════════════════════════════════════════════
+        #   [사용자 요구] "키에서 손을 떼는 즉시 급정지. 덜컹거려도 좋다."
+        #
+        #   [왜 터미널만으로는 '무료 점심'이 없는가]
+        #     터미널은 **키를 뗐다는 이벤트를 주지 않습니다.** 문자 스트림만 옵니다.
+        #       누름 -> 문자 1개 -> 약 0.5초 침묵 -> 30 Hz 연타 -> 뗌 -> 침묵
+        #     그래서 '침묵'이 (a) 아직 연타 전인지 (b) 손을 뗀 것인지 구분할 방법이
+        #     원리적으로 없습니다. 유예를 짧게 하면 (a)에서 멈칫하고,
+        #     길게 하면 (b)에서 관성이 남습니다. 둘 중 하나를 골라야 합니다.
+        #     v3 는 (a)를 택했고, 사용자는 (b)를 원합니다. 그래서 기본값을 바꿉니다.
+        #
+        #   adaptive_grace = False (기본) -> key_grace 를 균일 적용. 즉시 정지.
+        #   adaptive_grace = True         -> v3 의 적응형 동작으로 복귀.
+        #
+        #   ※ key_grace 를 0.0 으로 두면 연타 간격(33ms)조차 '뗌'으로 읽어
+        #     주행 내내 30 Hz 로 끊깁니다. 0.05 는 연타(33ms)는 견디면서
+        #     손을 떼면 50ms 안에 서는 값으로, 사실상 '즉시'입니다.
+        #     그래도 0 을 원하시면 0.0 을 넣으십시오. 막지 않았습니다.
+        self.declare_parameter('adaptive_grace', False)
+        self.declare_parameter('key_grace',      0.05)
 
         gp = self.get_parameter
         self._spd_normal    = gp('normal_speed').value
@@ -110,7 +150,17 @@ class KeyboardNode(Node):
         self._spd_overdrive = gp('overdrive_speed').value
         publish_hz          = float(gp('publish_hz').value)
         self._input_wd      = float(gp('input_watchdog').value)
-        self._key_grace     = float(gp('key_release_grace').value)
+        self._grace_initial = float(gp('key_grace_initial').value)
+        self._grace_repeat  = float(gp('key_grace_repeat').value)
+        self._repeat_detect = float(gp('key_repeat_detect').value)
+        self._adaptive      = bool(gp('adaptive_grace').value)
+        self._key_grace     = max(0.0, float(gp('key_grace').value))
+
+        # ★ [v4] motor_node 에서 겪은 것과 같은 함정을 여기서도 막습니다.
+        #   파라미터를 __init__ 에서만 읽으면 `ros2 param set` 이 "성공"을
+        #   출력하고도 아무 일이 일어나지 않습니다(조용한 실패).
+        #   주행 중에 유예를 바꿔가며 감을 잡을 수 있어야 하므로 콜백을 답니다.
+        self.add_on_set_parameters_callback(self._on_set_params)
 
         # ── 게시자 ────────────────────────────────────────────────
         self._cmd_pub   = self.create_publisher(Twist,  '/cmd_vel_keyboard', 10)
@@ -122,6 +172,7 @@ class KeyboardNode(Node):
         self._speed_mode = 'normal'
         self._keys       = set()
         self._key_stamp  = 0.0            # 마지막으로 키가 관측된 시각
+        self._repeat_active = False       # ★ auto-repeat 연타 구간에 들어왔는가
         self._key_lock   = threading.Lock()
         self._orig_term  = None
         self._estopped   = False
@@ -148,7 +199,7 @@ class KeyboardNode(Node):
         self._mode_timer = self.create_timer(1.0, self._publish_mode)  # 1 Hz 재발행
 
         self.get_logger().info(
-            'KeyboardNode v2 준비 완료\n'
+            'KeyboardNode v4 준비 완료  [즉시정지 모드]\n'
             '  W/↑=전진  S/↓=후진  A/←=좌회전  D/→=우회전\n'
             '  Q=좌측 게걸음  E=우측 게걸음  T/Y/G/H=대각\n'
             '  ★ SPACE = 비상정지 토글(/e_stop)\n'
@@ -289,9 +340,23 @@ class KeyboardNode(Node):
                     elif ch in ('h', 'H'): current_frame.update(('S', 'E'))
 
                 if current_frame:
+                    tnow = time.monotonic()
                     with self._key_lock:
+                        # ── ★ auto-repeat 활성 여부 판정 ────────────────
+                        #   터미널은 "첫 문자 → 약 0.5초 침묵 → 30Hz 연타" 로 동작합니다.
+                        #   따라서 '연타 구간에 들어왔는가'를 알면 유예를 짧게 줄일 수 있고,
+                        #   그러면 키를 뗐을 때 빨리 멈춥니다.
+                        #     - 직전 문자와의 간격이 짧다  -> 연타 중  -> 짧은 유예
+                        #     - 키 조합이 바뀌었다          -> 새 키의 초기 지연 -> 긴 유예
+                        gap = tnow - self._key_stamp if self._key_stamp else 1e9
+                        if current_frame != self._keys:
+                            self._repeat_active = False      # 조합 변경 = 처음부터
+                        elif gap < self._repeat_detect:
+                            self._repeat_active = True       # 연타 구간 진입
+                        elif gap > self._grace_initial:
+                            self._repeat_active = False      # 오래 끊겼다 = 새로 누름
                         self._keys = current_frame
-                        self._key_stamp = time.monotonic()
+                        self._key_stamp = tnow
 
             except Exception as exc:
                 # ★ 기존: break (키 잔존 → 20Hz 무한 재발행 → 폭주)
@@ -304,6 +369,41 @@ class KeyboardNode(Node):
     # ══════════════════════════════════════════════════════════════
     # 20 Hz 발행
     # ══════════════════════════════════════════════════════════════
+
+    def _on_set_params(self, params):
+        """주행 중 유예 조정을 허용합니다. 검증 실패 시 전부 거부(원자적)."""
+        from rcl_interfaces.msg import SetParametersResult
+        pend = {}
+        for p in params:
+            try:
+                if p.name == 'key_grace':
+                    v = float(p.value)
+                    if not (0.0 <= v <= 2.0):
+                        return SetParametersResult(
+                            successful=False, reason='key_grace 는 0.0~2.0 범위입니다.')
+                    pend['key_grace'] = v
+                elif p.name == 'adaptive_grace':
+                    pend['adaptive_grace'] = bool(p.value)
+                elif p.name in ('key_grace_initial', 'key_grace_repeat', 'key_repeat_detect'):
+                    v = float(p.value)
+                    if not (0.0 <= v <= 3.0):
+                        return SetParametersResult(
+                            successful=False, reason=f'{p.name} 범위 밖.')
+                    pend[p.name] = v
+            except (TypeError, ValueError) as exc:
+                return SetParametersResult(successful=False, reason=f'{p.name}: {exc}')
+        if not pend:
+            return SetParametersResult(successful=True)
+        for k, v in pend.items():
+            setattr(self, {'key_grace': '_key_grace',
+                           'adaptive_grace': '_adaptive',
+                           'key_grace_initial': '_grace_initial',
+                           'key_grace_repeat': '_grace_repeat',
+                           'key_repeat_detect': '_repeat_detect'}[k], v)
+        self.get_logger().warn(
+            f'[키 유예 갱신] adaptive={self._adaptive} key_grace={self._key_grace:.3f}s '
+            f'(initial={self._grace_initial:.2f} repeat={self._grace_repeat:.2f})')
+        return SetParametersResult(successful=True)
 
     def _publish_cmd(self) -> None:
         now = time.monotonic()
@@ -330,12 +430,23 @@ class KeyboardNode(Node):
             self._publish_zero()          # AUTO 에서도 0 을 계속 흘려 하트비트 유지
             return
 
-        # ── 키 유예 판정 ─────────────────────────────────────────
+        # ── ★ 적응형 키 유예 판정 ────────────────────────────────
+        #   auto-repeat 연타 구간에서는 짧은 유예(빠른 정지),
+        #   첫 문자 직후 침묵 구간에서만 긴 유예(멈칫 방지).
+        #   => "누르고 있으면 부드럽고, 떼면 바로 선다" 를 동시에 만족
         with self._key_lock:
             keys = set(self._keys)
             stamp = self._key_stamp
-        if (now - stamp) > self._key_grace:
+            repeating = self._repeat_active
+        # ★ [v4] 기본은 균일 유예(즉시 정지). adaptive_grace=true 일 때만 v3 동작.
+        if self._adaptive:
+            grace = self._grace_repeat if repeating else self._grace_initial
+        else:
+            grace = self._key_grace
+        if (now - stamp) > grace:
             keys = set()                  # 유예 초과 = 키를 뗀 것
+            with self._key_lock:
+                self._repeat_active = False
 
         spd = (self._spd_overdrive if self._speed_mode == 'overdrive'
                else self._spd_boost if self._speed_mode == 'boost'

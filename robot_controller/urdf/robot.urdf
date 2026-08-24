@@ -25,191 +25,158 @@
   <link name="base_link">
     <visual>
       <origin xyz="0.0 0.0 0.35" rpy="0 0 0"/>
-      <geometry>
-        <box size="0.50 0.40 0.54"/>
-      </geometry>
+      <geometry><box size="0.50 0.40 0.54"/></geometry>
       <material name="blue"/>
     </visual>
     <collision>
       <origin xyz="0.0 0.0 0.35" rpy="0 0 0"/>
-      <geometry>
-        <box size="0.50 0.40 0.54"/>
-      </geometry>
+      <geometry><box size="0.50 0.40 0.54"/></geometry>
     </collision>
     <inertial>
       <origin xyz="0.0 0.0 0.35" rpy="0 0 0"/>
       <mass value="10.0"/>
-      <inertia ixx="0.376" ixy="0.0" ixz="0.0"
-               iyy="0.451" iyz="0.0"
-               izz="0.341"/>
+      <inertia ixx="0.376" ixy="0.0" ixz="0.0" iyy="0.451" iyz="0.0" izz="0.341"/>
     </inertial>
   </link>
 
   <link name="wheel_front_left_link">
     <visual>
       <origin xyz="0 0 0" rpy="1.5707963 0 0"/>
-      <geometry>
-        <cylinder radius="0.06" length="0.08"/>
-      </geometry>
+      <geometry><cylinder radius="0.06" length="0.08"/></geometry>
       <material name="black"/>
     </visual>
     <collision>
       <origin xyz="0 0 0" rpy="1.5707963 0 0"/>
-      <geometry>
-        <cylinder radius="0.06" length="0.08"/>
-      </geometry>
+      <geometry><cylinder radius="0.06" length="0.08"/></geometry>
     </collision>
     <inertial>
       <mass value="0.5"/>
-      <inertia ixx="0.0007" ixy="0.0" ixz="0.0"
-               iyy="0.0007" iyz="0.0"
-               izz="0.0009"/>
+      <inertia ixx="0.0007" ixy="0.0" ixz="0.0" iyy="0.0007" iyz="0.0" izz="0.0009"/>
     </inertial>
   </link>
-
   <joint name="wheel_front_left_joint" type="fixed">
-    <parent link="base_link"/>
-    <child  link="wheel_front_left_link"/>
+    <parent link="base_link"/><child link="wheel_front_left_link"/>
     <origin xyz="0.25 0.255 0.06" rpy="0 0 0"/>
   </joint>
 
   <link name="wheel_front_right_link">
     <visual>
       <origin xyz="0 0 0" rpy="1.5707963 0 0"/>
-      <geometry>
-        <cylinder radius="0.06" length="0.08"/>
-      </geometry>
+      <geometry><cylinder radius="0.06" length="0.08"/></geometry>
       <material name="black"/>
     </visual>
     <collision>
       <origin xyz="0 0 0" rpy="1.5707963 0 0"/>
-      <geometry>
-        <cylinder radius="0.06" length="0.08"/>
-      </geometry>
+      <geometry><cylinder radius="0.06" length="0.08"/></geometry>
     </collision>
     <inertial>
       <mass value="0.5"/>
-      <inertia ixx="0.0007" ixy="0.0" ixz="0.0"
-               iyy="0.0007" iyz="0.0"
-               izz="0.0009"/>
+      <inertia ixx="0.0007" ixy="0.0" ixz="0.0" iyy="0.0007" iyz="0.0" izz="0.0009"/>
     </inertial>
   </link>
-
   <joint name="wheel_front_right_joint" type="fixed">
-    <parent link="base_link"/>
-    <child  link="wheel_front_right_link"/>
+    <parent link="base_link"/><child link="wheel_front_right_link"/>
     <origin xyz="0.25 -0.255 0.06" rpy="0 0 0"/>
   </joint>
 
   <link name="wheel_rear_left_link">
     <visual>
       <origin xyz="0 0 0" rpy="1.5707963 0 0"/>
-      <geometry>
-        <cylinder radius="0.06" length="0.08"/>
-      </geometry>
+      <geometry><cylinder radius="0.06" length="0.08"/></geometry>
       <material name="black"/>
     </visual>
     <collision>
       <origin xyz="0 0 0" rpy="1.5707963 0 0"/>
-      <geometry>
-        <cylinder radius="0.06" length="0.08"/>
-      </geometry>
+      <geometry><cylinder radius="0.06" length="0.08"/></geometry>
     </collision>
     <inertial>
       <mass value="0.5"/>
-      <inertia ixx="0.0007" ixy="0.0" ixz="0.0"
-               iyy="0.0007" iyz="0.0"
-               izz="0.0009"/>
+      <inertia ixx="0.0007" ixy="0.0" ixz="0.0" iyy="0.0007" iyz="0.0" izz="0.0009"/>
     </inertial>
   </link>
-
   <joint name="wheel_rear_left_joint" type="fixed">
-    <parent link="base_link"/>
-    <child  link="wheel_rear_left_link"/>
+    <parent link="base_link"/><child link="wheel_rear_left_link"/>
     <origin xyz="-0.25 0.255 0.06" rpy="0 0 0"/>
   </joint>
 
   <link name="wheel_rear_right_link">
     <visual>
       <origin xyz="0 0 0" rpy="1.5707963 0 0"/>
-      <geometry>
-        <cylinder radius="0.06" length="0.08"/>
-      </geometry>
+      <geometry><cylinder radius="0.06" length="0.08"/></geometry>
       <material name="black"/>
     </visual>
     <collision>
       <origin xyz="0 0 0" rpy="1.5707963 0 0"/>
-      <geometry>
-        <cylinder radius="0.06" length="0.08"/>
-      </geometry>
+      <geometry><cylinder radius="0.06" length="0.08"/></geometry>
     </collision>
     <inertial>
       <mass value="0.5"/>
-      <inertia ixx="0.0007" ixy="0.0" ixz="0.0"
-               iyy="0.0007" iyz="0.0"
-               izz="0.0009"/>
+      <inertia ixx="0.0007" ixy="0.0" ixz="0.0" iyy="0.0007" iyz="0.0" izz="0.0009"/>
     </inertial>
   </link>
-
   <joint name="wheel_rear_right_joint" type="fixed">
-    <parent link="base_link"/>
-    <child  link="wheel_rear_right_link"/>
+    <parent link="base_link"/><child link="wheel_rear_right_link"/>
     <origin xyz="-0.25 -0.255 0.06" rpy="0 0 0"/>
   </joint>
 
+  <!-- ★ 라이다 방향 — 사용자 확인: 물리적으로 뒤통수를 보게 180도 장착됨.
+       따라서 rpy yaw = pi 가 현실과 일치하며 이대로 둡니다.
+       (스캔은 lidar_link 기준으로 발행되고 TF 가 자동 보정하므로,
+        코드나 드라이버에서 각도를 또 빼면 이중 보정이 됩니다. 하지 마십시오)
+
+       ※ 단, 이전에 "앞 벽이 뒤에 찍힌다"는 관측이 있었고 그 시점 Foxglove 는
+         `Frame map not found` 로 TF 체인이 끊긴 상태였습니다.
+         원시 데이터로 확정하려면:   ros2 run robot_controller lidar_check
+         (정면 1 m 앞에만 물체를 두고 실행. base_link 방위 0도면 정상,
+          180도면 이 rpy 를 0 으로 바꿔야 합니다) -->
   <link name="lidar_link">
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0"/>
-      <geometry>
-        <cylinder radius="0.05" length="0.05"/>
-      </geometry>
+      <geometry><cylinder radius="0.05" length="0.05"/></geometry>
       <material name="black"/>
     </visual>
     <collision>
       <origin xyz="0 0 0" rpy="0 0 0"/>
-      <geometry>
-        <cylinder radius="0.05" length="0.05"/>
-      </geometry>
+      <geometry><cylinder radius="0.05" length="0.05"/></geometry>
     </collision>
     <inertial>
       <mass value="0.15"/>
-      <inertia ixx="0.0001" ixy="0.0" ixz="0.0"
-               iyy="0.0001" iyz="0.0"
-               izz="0.0001"/>
+      <inertia ixx="0.0001" ixy="0.0" ixz="0.0" iyy="0.0001" iyz="0.0" izz="0.0001"/>
     </inertial>
   </link>
+  <!-- ★ 라이다 방향 — 사용자 확인: 물리적으로 뒤통수를 보게 180도 장착됨.
+       따라서 rpy yaw = pi 가 현실과 일치하므로 이대로 둡니다.
+       스캔은 lidar_link 기준으로 발행되고 TF 가 자동 보정하므로,
+       코드나 드라이버에서 각도를 또 빼면 이중 보정이 됩니다. 하지 마십시오.
 
+       ※ 다만 직전에 "앞 벽이 뒤에 찍힌다"는 상반된 관측이 있었고, 그 시점
+         Foxglove 는 `Frame map not found` 로 TF 체인이 끊긴 상태였습니다.
+         원시 데이터로 3분이면 확정됩니다:
+             ros2 run robot_controller lidar_check
+         (정면 1 m 앞에만 물체를 두고 실행.
+          base_link 방위가 0도면 이대로 정상, 180도면 아래 rpy 를 0 으로) -->
   <joint name="lidar_joint" type="fixed">
-    <parent link="base_link"/>
-    <child  link="lidar_link"/>
+    <parent link="base_link"/><child link="lidar_link"/>
     <origin xyz="0.16 0.0 0.67" rpy="0 0 3.14159"/>
   </joint>
 
   <link name="imu_link">
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0"/>
-      <geometry>
-        <box size="0.03 0.03 0.005"/>
-      </geometry>
+      <geometry><box size="0.03 0.03 0.005"/></geometry>
       <material name="red"/>
     </visual>
     <collision>
       <origin xyz="0 0 0" rpy="0 0 0"/>
-      <geometry>
-        <box size="0.03 0.03 0.005"/>
-      </geometry>
+      <geometry><box size="0.03 0.03 0.005"/></geometry>
     </collision>
     <inertial>
       <mass value="0.01"/>
-      <inertia ixx="1e-6" ixy="0.0" ixz="0.0"
-               iyy="1e-6" iyz="0.0"
-               izz="1e-6"/>
+      <inertia ixx="1.0e-6" ixy="0.0" ixz="0.0" iyy="1.0e-6" iyz="0.0" izz="1.0e-6"/>
     </inertial>
   </link>
-
   <joint name="imu_joint" type="fixed">
-    <parent link="base_link"/>
-    <child  link="imu_link"/>
+    <parent link="base_link"/><child link="imu_link"/>
     <origin xyz="0.18 0.0 0.6225" rpy="0 0 0"/>
   </joint>
 
